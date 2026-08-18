@@ -416,7 +416,191 @@ const server =
         return;
 
       }
+/* ================================
+   TESTAR MOTOR MUSICAL
+================================ */
 
+if(
+  req.method === "GET"
+  &&
+  req.url.startsWith(
+    "/chord?"
+  )
+){
+
+  try{
+
+    const url =
+      new URL(
+        req.url,
+        "http://localhost"
+      );
+
+
+    const name =
+      url.searchParams.get(
+        "name"
+      );
+
+
+    if(!name){
+
+      sendJson(
+        res,
+        400,
+        {
+          error:
+            "Informe um acorde"
+        }
+      );
+
+      return;
+
+    }
+
+
+    const result =
+      analyzeChord(
+        name
+      );
+
+
+    sendJson(
+      res,
+      result.valid
+        ? 200
+        : 400,
+      result
+    );
+
+
+  }
+  catch(error){
+
+    sendJson(
+      res,
+      500,
+      {
+        error:
+          error.message
+      }
+    );
+
+  }
+
+
+  return;
+
+}
+
+
+
+/* ================================
+   TRANSPOR ACORDE
+================================ */
+
+if(
+  req.method === "GET"
+  &&
+  req.url.startsWith(
+    "/transpose?"
+  )
+){
+
+  const url =
+    new URL(
+      req.url,
+      "http://localhost"
+    );
+
+
+  const chord =
+    url.searchParams.get(
+      "chord"
+    );
+
+
+  const semitones =
+    Number(
+      url.searchParams.get(
+        "semitones"
+      )
+    );
+
+
+  if(
+    !chord
+    ||
+    !Number.isFinite(
+      semitones
+    )
+  ){
+
+    sendJson(
+      res,
+      400,
+      {
+        error:
+          "Parâmetros inválidos"
+      }
+    );
+
+    return;
+
+  }
+
+
+  const result =
+    transposeChord(
+      chord,
+      semitones
+    );
+
+
+  sendJson(
+    res,
+    result
+      ? 200
+      : 400,
+    {
+      original:
+        chord,
+
+      semitones,
+
+      result
+    }
+  );
+
+
+  return;
+
+}
+
+
+
+/* ================================
+   NOTAS DISPONÍVEIS
+================================ */
+
+if(
+  req.method === "GET"
+  &&
+  req.url === "/notes"
+){
+
+  sendJson(
+    res,
+    200,
+    {
+      notes:
+        getNoteNames()
+    }
+  );
+
+  return;
+
+}
 
       /* 404 */
 
