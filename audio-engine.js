@@ -1,17 +1,29 @@
 import Meyda from "meyda";
 import WavDecoder from "wav-decoder";
 
-/* =========================================
-   CHORD AI — AUDIO ENGINE
 
-   Converte frames de áudio em informações
-   harmônicas que depois serão enviadas ao
-   chord-engine.
+/* =========================================
+   CHORD AI — AUDIO ENGINE v2
+
+   WAV
+    ↓
+   PCM mono
+    ↓
+   frames espectrais
+    ↓
+   chroma
+    ↓
+   filtro de silêncio
+    ↓
+   agregação temporal
+    ↓
+   seleção inteligente de notas
+    ↓
+   Chord Engine
 ========================================= */
 
 
 const NOTE_NAMES = [
-
   "C",
   "C#",
   "D",
@@ -24,8 +36,73 @@ const NOTE_NAMES = [
   "A",
   "A#",
   "B"
-
 ];
+
+
+/* =========================================
+   UTILIDADES
+========================================= */
+
+function clamp(
+  value,
+  min,
+  max
+){
+
+  return Math.max(
+    min,
+    Math.min(
+      max,
+      value
+    )
+  );
+
+}
+
+
+function median(values){
+
+  if(
+    !Array.isArray(values)
+    ||
+    values.length === 0
+  ){
+
+    return 0;
+
+  }
+
+
+  const sorted =
+    [...values]
+      .sort(
+        (a,b) =>
+          a - b
+      );
+
+
+  const middle =
+    Math.floor(
+      sorted.length / 2
+    );
+
+
+  if(
+    sorted.length % 2 === 0
+  ){
+
+    return (
+      sorted[middle - 1]
+      +
+      sorted[middle]
+    ) / 2;
+
+  }
+
+
+  return sorted[middle];
+
+}
 
 
 /* =========================================
@@ -37,7 +114,9 @@ function normalizeChroma(
 ){
 
   if(
-    !Array.isArray(chroma)
+    !chroma
+    ||
+    typeof chroma.length !== "number"
     ||
     chroma.length !== 12
   ){
@@ -48,25 +127,29 @@ function normalizeChroma(
 
 
   const values =
-    chroma.map(
-      value => {
+    Array.from(chroma)
+      .map(
+        value => {
 
-        const number =
-          Number(value);
+          const number =
+            Number(value);
 
-        return (
-          Number.isFinite(number)
-          ?
-          Math.max(
+          if(
+            !Number.isFinite(number)
+          ){
+
+            return 0;
+
+          }
+
+
+          return Math.max(
             0,
             number
-          )
-          :
-          0
-        );
+          );
 
-      }
-    );
+        }
+      );
 
 
   const max =
@@ -94,7 +177,41 @@ function normalizeChroma(
 
 
 /* =========================================
-   CHROMA -> NOTAS PROVÁVEIS
+   ENERGIA TOTAL DO CHROMA
+========================================= */
+
+function chromaEnergy(
+  chroma
+){
+
+  if(
+    !Array.isArray(chroma)
+  ){
+
+    return 0;
+
+  }
+
+
+  return chroma.reduce(
+    (sum,value) =>
+      sum + value,
+    0
+  );
+
+}
+
+
+/* =========================================
+   CHROMA -> NOTAS
+
+   Agora não usamos apenas threshold fixo.
+
+   Levamos em conta:
+   - energia relativa
+   - distância da nota mais forte
+   - limite máximo
+   - quantidade de notas realmente fortes
 ========================================= */
 
 export function chromaToNotes(
@@ -115,29 +232,56 @@ export function chromaToNotes(
   }
 
 
-  const threshold =
-    Number.isFinite(
-      options.threshold
-    )
-    ?
-    options.threshold
-    :
-    0.58;
-
-
   const maxNotes =
     Number.isFinite(
-      options.maxNotes
-    )
-    ?
-    Math.max(
-      1,
-      Math.floor(
+      Number(
         options.maxNotes
       )
     )
+    ?
+    clamp(
+      Math.floor(
+        Number(
+          options.maxNotes
+        )
+      ),
+      1,
+      8
+    )
     :
-    6;
+    5;
+
+
+  const relativeThreshold =
+    Number.isFinite(
+      Number(
+        options.threshold
+      )
+    )
+    ?
+    clamp(
+      Number(
+        options.threshold
+      ),
+      0.20,
+      0.95
+    )
+    :
+    0.62;
+
+
+  const minimumEnergy =
+    Number.isFinite(
+      Number(
+        options.minimumEnergy
+      )
+    )
+    ?
+    Number(
+      options.minimumEnergy
+    )
+    :
+    0.18;
 
 
   const ranked =
@@ -154,7 +298,6 @@ export function chromaToNotes(
 
         })
       )
-
       .sort(
         (a,b) =>
           b.energy -
@@ -162,48 +305,110 @@ export function chromaToNotes(
       );
 
 
-  const notes =
-    ranked
-      .filter(
-        item =>
-          item.energy >=
-          threshold
-      )
-
-      .slice(
-        0,
-        maxNotes
-      );
-
-
-  /*
-    Caso nenhuma nota passe
-    pelo threshold, preservamos
-    pelo menos a dominante.
-  */
-
   if(
-    notes.length === 0
-    &&
-    ranked[0]
-    &&
-    ranked[0].energy > 0
+    ranked.length === 0
+    ||
+    ranked[0].energy <= 0
   ){
 
-    return [
-      ranked[0].note
-    ];
+    return [];
 
   }
 
 
+  const strongest =
+    ranked[0].energy;
+
+
+  let candidates =
+    ranked.filter(
+      item => {
+
+        if(
+          item.energy <
+          minimumEnergy
+        ){
+
+          return false;
+
+        }
+
+
+        return (
+          item.energy
+          >=
+          strongest
+          *
+          relativeThreshold
+        );
+
+      }
+    );
+
+
   /*
-    Ordenamos novamente por pitch class,
-    para não depender da força da nota
-    na saída final.
+    Para um acorde simples,
+    normalmente queremos 3 notas.
+
+    Se existem três notas claramente
+    fortes e o quarto candidato é muito
+    mais fraco, paramos em três.
   */
 
-  return notes
+  if(
+    candidates.length >= 4
+  ){
+
+    const third =
+      candidates[2].energy;
+
+    const fourth =
+      candidates[3].energy;
+
+
+    if(
+      fourth <
+      third * 0.72
+    ){
+
+      candidates =
+        candidates.slice(
+          0,
+          3
+        );
+
+    }
+
+  }
+
+
+  candidates =
+    candidates.slice(
+      0,
+      maxNotes
+    );
+
+
+  /*
+    Muito importante:
+
+    NÃO retornamos a nota mais forte
+    sozinha para análise de acordes.
+
+    Uma única nota não é informação
+    harmônica suficiente.
+  */
+
+  if(
+    candidates.length < 2
+  ){
+
+    return [];
+
+  }
+
+
+  return candidates
     .sort(
       (a,b) =>
         a.index -
@@ -218,7 +423,7 @@ export function chromaToNotes(
 
 
 /* =========================================
-   ANALISAR UM FRAME DE ÁUDIO
+   ANALISAR UM FRAME
 ========================================= */
 
 export function analyzeAudioFrame(
@@ -230,15 +435,18 @@ export function analyzeAudioFrame(
   if(
     !samples
     ||
-    typeof samples.length !==
-      "number"
+    typeof samples.length !== "number"
     ||
     samples.length === 0
   ){
 
     return {
+
       valid:false,
-      error:"Frame de áudio vazio"
+
+      error:
+        "Frame de áudio vazio"
+
     };
 
   }
@@ -257,19 +465,16 @@ export function analyzeAudioFrame(
   ){
 
     return {
+
       valid:false,
-      error:"sampleRate inválido"
+
+      error:
+        "sampleRate inválido"
+
     };
 
   }
 
-
-  /*
-    O Meyda trabalha melhor com
-    tamanho de buffer conhecido.
-
-    Aqui usamos o tamanho do frame.
-  */
 
   Meyda.sampleRate =
     rate;
@@ -288,19 +493,17 @@ export function analyzeAudioFrame(
 
     features =
       Meyda.extract(
-
         [
           "chroma",
           "rms",
           "spectralCentroid",
           "spectralFlatness"
         ],
-
         samples
-
       );
 
   }
+
   catch(error){
 
     return {
@@ -342,18 +545,23 @@ export function analyzeAudioFrame(
     );
 
 
-  const notes =
-    chromaToNotes(
-      chroma,
-      {
+  if(!chroma){
 
-        threshold:
-          options.threshold,
+    return {
 
-        maxNotes:
-          options.maxNotes
+      valid:false,
 
-      }
+      error:
+        "Chroma inválido"
+
+    };
+
+  }
+
+
+  const rms =
+    Number(
+      features.rms || 0
     );
 
 
@@ -363,12 +571,7 @@ export function analyzeAudioFrame(
 
     chroma,
 
-    notes,
-
-    rms:
-      Number(
-        features.rms || 0
-      ),
+    rms,
 
     spectralCentroid:
       Number(
@@ -386,7 +589,83 @@ export function analyzeAudioFrame(
 
 
 /* =========================================
-   MÉDIA DE VÁRIOS CHROMAS
+   MEDIANA DE CHROMAS
+
+   Muito mais resistente a ruído
+   que média simples.
+========================================= */
+
+export function medianChroma(
+  chromaFrames
+){
+
+  if(
+    !Array.isArray(
+      chromaFrames
+    )
+    ||
+    chromaFrames.length === 0
+  ){
+
+    return null;
+
+  }
+
+
+  const valid =
+    chromaFrames
+      .map(
+        frame =>
+          normalizeChroma(
+            frame
+          )
+      )
+      .filter(Boolean);
+
+
+  if(
+    valid.length === 0
+  ){
+
+    return null;
+
+  }
+
+
+  const result =
+    new Array(12)
+      .fill(0);
+
+
+  for(
+    let pitch = 0;
+    pitch < 12;
+    pitch++
+  ){
+
+    result[pitch] =
+      median(
+        valid.map(
+          chroma =>
+            chroma[pitch]
+        )
+      );
+
+  }
+
+
+  return normalizeChroma(
+    result
+  );
+
+}
+
+
+/* =========================================
+   MÉDIA DE CHROMA
+
+   Mantida porque outras rotas
+   do projeto já podem usar.
 ========================================= */
 
 export function averageChroma(
@@ -468,7 +747,9 @@ export function averageChroma(
 
 
 /* =========================================
-   SUAVIZAR SEQUÊNCIA DE CHROMA
+   SUAVIZAÇÃO SIMPLES
+
+   Mantida por compatibilidade.
 ========================================= */
 
 export function smoothChromaFrames(
@@ -539,7 +820,7 @@ export function smoothChromaFrames(
 
 
       const chroma =
-        averageChroma(
+        medianChroma(
           nearby
         );
 
@@ -554,7 +835,14 @@ export function smoothChromaFrames(
           chroma
           ?
           chromaToNotes(
-            chroma
+            chroma,
+            {
+              threshold:
+                0.62,
+
+              maxNotes:
+                5
+            }
           )
           :
           []
@@ -567,71 +855,6 @@ export function smoothChromaFrames(
 }
 
 
-/* =========================================
-   TESTE INTERNO DE CHROMA
-
-   Isso não analisa áudio real.
-   Serve apenas para validar o pipeline
-   Chroma -> notas.
-========================================= */
-
-export function createChromaTest(
-  notes
-){
-
-  if(
-    !Array.isArray(notes)
-  ){
-
-    return null;
-
-  }
-
-
-  const chroma =
-    new Array(12)
-      .fill(0);
-
-
-  for(
-    const note
-    of notes
-  ){
-
-    const index =
-      NOTE_NAMES.indexOf(
-        String(note)
-          .toUpperCase()
-      );
-
-
-    if(
-      index >= 0
-    ){
-
-      chroma[index] =
-        1;
-
-    }
-
-  }
-
-
-  return {
-
-    chroma,
-
-    notes:
-      chromaToNotes(
-        chroma,
-        {
-          threshold:0.5
-        }
-      )
-
-  };
-
-}
 /* =========================================
    DECODIFICAR WAV
 ========================================= */
@@ -656,7 +879,9 @@ export async function decodeWavBuffer(
   const arrayBuffer =
     buffer.buffer.slice(
       buffer.byteOffset,
-      buffer.byteOffset + buffer.byteLength
+      buffer.byteOffset
+      +
+      buffer.byteLength
     );
 
 
@@ -707,6 +932,7 @@ export function toMono(
   ){
 
     return new Float32Array();
+
   }
 
 
@@ -715,11 +941,17 @@ export function toMono(
   ){
 
     return channelData[0];
+
   }
 
 
   const length =
-    channelData[0].length;
+    Math.min(
+      ...channelData.map(
+        channel =>
+          channel.length
+      )
+    );
 
 
   const mono =
@@ -760,7 +992,414 @@ export function toMono(
 
 
 /* =========================================
-   ANALISAR WAV COMPLETO
+   CALCULAR NÍVEL DE RUÍDO / SILÊNCIO
+========================================= */
+
+function calculateRmsFloor(
+  frames
+){
+
+  if(
+    !Array.isArray(frames)
+    ||
+    frames.length === 0
+  ){
+
+    return 0.002;
+
+  }
+
+
+  const values =
+    frames
+      .map(
+        frame =>
+          Number(
+            frame.rms || 0
+          )
+      )
+      .filter(
+        value =>
+          Number.isFinite(value)
+      )
+      .sort(
+        (a,b) =>
+          a - b
+      );
+
+
+  if(
+    values.length === 0
+  ){
+
+    return 0.002;
+
+  }
+
+
+  /*
+    Percentil baixo:
+    aproxima o piso de ruído.
+  */
+
+  const index =
+    Math.floor(
+      values.length * 0.15
+    );
+
+
+  const noise =
+    values[
+      Math.min(
+        index,
+        values.length - 1
+      )
+    ];
+
+
+  return Math.max(
+    0.0015,
+    noise * 2.2
+  );
+
+}
+
+
+/* =========================================
+   AGRUPAR FRAMES EM JANELAS MUSICAIS
+
+   Em vez de decidir um acorde a cada
+   ~46 ms, agrupamos vários frames.
+
+   Default:
+   cerca de 250 ms por decisão.
+========================================= */
+
+function aggregateFrames(
+  rawFrames,
+  options = {}
+){
+
+  if(
+    !Array.isArray(rawFrames)
+    ||
+    rawFrames.length === 0
+  ){
+
+    return [];
+
+  }
+
+
+  const windowSeconds =
+    Number.isFinite(
+      Number(
+        options.windowSeconds
+      )
+    )
+    ?
+    clamp(
+      Number(
+        options.windowSeconds
+      ),
+      0.12,
+      1.0
+    )
+    :
+    0.25;
+
+
+  const hopSeconds =
+    Number.isFinite(
+      Number(
+        options.decisionHopSeconds
+      )
+    )
+    ?
+    clamp(
+      Number(
+        options.decisionHopSeconds
+      ),
+      0.08,
+      windowSeconds
+    )
+    :
+    0.20;
+
+
+  const rmsFloor =
+    calculateRmsFloor(
+      rawFrames
+    );
+
+
+  const duration =
+    rawFrames[
+      rawFrames.length - 1
+    ].time;
+
+
+  const output = [];
+
+
+  for(
+    let startTime = 0;
+    startTime <= duration;
+    startTime += hopSeconds
+  ){
+
+    const endTime =
+      startTime
+      +
+      windowSeconds;
+
+
+    const members =
+      rawFrames.filter(
+        frame =>
+          frame.time >= startTime
+          &&
+          frame.time < endTime
+          &&
+          frame.rms >= rmsFloor
+      );
+
+
+    if(
+      members.length === 0
+    ){
+
+      output.push({
+
+        time:
+          startTime,
+
+        chroma:
+          null,
+
+        notes:
+          [],
+
+        rms:
+          0,
+
+        silence:
+          true
+
+      });
+
+
+      continue;
+
+    }
+
+
+    const chroma =
+      medianChroma(
+        members.map(
+          frame =>
+            frame.chroma
+        )
+      );
+
+
+    const rms =
+      median(
+        members.map(
+          frame =>
+            frame.rms
+        )
+      );
+
+
+    const notes =
+      chroma
+      ?
+      chromaToNotes(
+        chroma,
+        {
+
+          threshold:
+            options.threshold,
+
+          maxNotes:
+            options.maxNotes
+
+        }
+      )
+      :
+      [];
+
+
+    output.push({
+
+      time:
+        startTime,
+
+      chroma,
+
+      notes,
+
+      rms,
+
+      silence:
+        false,
+
+      sourceFrames:
+        members.length
+
+    });
+
+  }
+
+
+  return output;
+
+}
+
+
+/* =========================================
+   NOTAS PERSISTENTES
+
+   Uma nota precisa aparecer em frames
+   vizinhos para ganhar confiança.
+
+   Isso elimina muitos harmônicos
+   instantâneos.
+========================================= */
+
+function enforceNotePersistence(
+  frames,
+  radius = 1
+){
+
+  if(
+    !Array.isArray(frames)
+    ||
+    frames.length === 0
+  ){
+
+    return [];
+
+  }
+
+
+  return frames.map(
+    (frame,index) => {
+
+      if(
+        !frame.notes
+        ||
+        frame.notes.length === 0
+      ){
+
+        return {
+          ...frame,
+          notes:[]
+        };
+
+      }
+
+
+      const start =
+        Math.max(
+          0,
+          index - radius
+        );
+
+
+      const end =
+        Math.min(
+          frames.length - 1,
+          index + radius
+        );
+
+
+      const count = {};
+
+
+      for(
+        let i = start;
+        i <= end;
+        i++
+      ){
+
+        const notes =
+          frames[i].notes || [];
+
+
+        for(
+          const note
+          of notes
+        ){
+
+          count[note] =
+            (
+              count[note] || 0
+            )
+            +
+            1;
+
+        }
+
+      }
+
+
+      const neighborhoodSize =
+        end - start + 1;
+
+
+      let persistent =
+        frame.notes.filter(
+          note =>
+            (
+              count[note] || 0
+            )
+            >=
+            Math.ceil(
+              neighborhoodSize * 0.5
+            )
+        );
+
+
+      /*
+        Não deixamos um acorde desaparecer
+        completamente só por uma pequena
+        diferença de vizinhança.
+      */
+
+      if(
+        persistent.length < 2
+        &&
+        frame.notes.length >= 2
+      ){
+
+        persistent =
+          frame.notes.slice(
+            0,
+            3
+          );
+
+      }
+
+
+      return {
+
+        ...frame,
+
+        notes:
+          persistent
+
+      };
+
+    }
+  );
+
+}
+
+
+/* =========================================
+   ANALISAR WAV COMPLETO — V2
 ========================================= */
 
 export async function analyzeWavBuffer(
@@ -784,13 +1423,28 @@ export async function analyzeWavBuffer(
     );
 
 
+  if(
+    mono.length === 0
+  ){
+
+    throw new Error(
+      "WAV sem amostras"
+    );
+
+  }
+
+
   const frameSize =
     Number.isFinite(
-      options.frameSize
+      Number(
+        options.frameSize
+      )
     )
     ?
     Math.floor(
-      options.frameSize
+      Number(
+        options.frameSize
+      )
     )
     :
     4096;
@@ -798,18 +1452,26 @@ export async function analyzeWavBuffer(
 
   const hopSize =
     Number.isFinite(
-      options.hopSize
+      Number(
+        options.hopSize
+      )
     )
     ?
     Math.floor(
-      options.hopSize
+      Number(
+        options.hopSize
+      )
     )
     :
     2048;
 
 
-  const frames = [];
+  const rawFrames = [];
 
+
+  /* =====================================
+     1. EXTRAÇÃO BRUTA
+  ===================================== */
 
   for(
     let start = 0;
@@ -817,14 +1479,10 @@ export async function analyzeWavBuffer(
     start += hopSize
   ){
 
-    const end =
-      start + frameSize;
-
-
     const samples =
       mono.slice(
         start,
-        end
+        start + frameSize
       );
 
 
@@ -845,7 +1503,7 @@ export async function analyzeWavBuffer(
     }
 
 
-    frames.push({
+    rawFrames.push({
 
       time:
         start
@@ -854,9 +1512,6 @@ export async function analyzeWavBuffer(
 
       chroma:
         analysis.chroma,
-
-      notes:
-        analysis.notes,
 
       rms:
         analysis.rms,
@@ -872,10 +1527,123 @@ export async function analyzeWavBuffer(
   }
 
 
-  const smoothed =
-    smoothChromaFrames(
-      frames,
-      2
+  if(
+    rawFrames.length === 0
+  ){
+
+    throw new Error(
+      "Nenhum frame de áudio pôde ser analisado"
+    );
+
+  }
+
+
+  /* =====================================
+     2. AGREGAÇÃO TEMPORAL
+  ===================================== */
+
+  let decisionFrames =
+    aggregateFrames(
+      rawFrames,
+      {
+
+        threshold:
+          Number.isFinite(
+            Number(
+              options.threshold
+            )
+          )
+          ?
+          Number(
+            options.threshold
+          )
+          :
+          0.62,
+
+        maxNotes:
+          Number.isFinite(
+            Number(
+              options.maxNotes
+            )
+          )
+          ?
+          Number(
+            options.maxNotes
+          )
+          :
+          5,
+
+        windowSeconds:
+          Number.isFinite(
+            Number(
+              options.windowSeconds
+            )
+          )
+          ?
+          Number(
+            options.windowSeconds
+          )
+          :
+          0.28,
+
+        decisionHopSeconds:
+          Number.isFinite(
+            Number(
+              options.decisionHopSeconds
+            )
+          )
+          ?
+          Number(
+            options.decisionHopSeconds
+          )
+          :
+          0.20
+
+      }
+    );
+
+
+  /* =====================================
+     3. PERSISTÊNCIA DAS NOTAS
+  ===================================== */
+
+  decisionFrames =
+    enforceNotePersistence(
+      decisionFrames,
+      1
+    );
+
+
+  /* =====================================
+     4. REMOVER FRAMES SEM HARMONIA
+  ===================================== */
+
+  const usefulFrames =
+    decisionFrames.map(
+      frame => {
+
+        if(
+          frame.silence
+          ||
+          !frame.notes
+          ||
+          frame.notes.length < 2
+        ){
+
+          return {
+
+            ...frame,
+
+            notes:[]
+
+          };
+
+        }
+
+
+        return frame;
+
+      }
     );
 
 
@@ -888,11 +1656,88 @@ export async function analyzeWavBuffer(
       /
       sampleRate,
 
+    rawFrameCount:
+      rawFrames.length,
+
     frameCount:
-      smoothed.length,
+      usefulFrames.length,
 
     frames:
-      smoothed
+      usefulFrames
+
+  };
+
+}
+
+
+/* =========================================
+   TESTE INTERNO DE CHROMA
+========================================= */
+
+export function createChromaTest(
+  notes
+){
+
+  if(
+    !Array.isArray(
+      notes
+    )
+  ){
+
+    return null;
+
+  }
+
+
+  const chroma =
+    new Array(12)
+      .fill(0);
+
+
+  for(
+    const note
+    of notes
+  ){
+
+    const normalized =
+      String(note)
+        .trim()
+        .toUpperCase();
+
+
+    const index =
+      NOTE_NAMES.indexOf(
+        normalized
+      );
+
+
+    if(
+      index >= 0
+    ){
+
+      chroma[index] =
+        1;
+
+    }
+
+  }
+
+
+  return {
+
+    chroma,
+
+    notes:
+      chromaToNotes(
+        chroma,
+        {
+          threshold:
+            0.5,
+
+          maxNotes:
+            6
+        }
+      )
 
   };
 
