@@ -10,7 +10,7 @@
   "engines": {
     "node": ">=18"
   },
-  "dependencies": {
-    "meyda": "^5.6.3"
-  }
+"dependencies": {
+  "meyda": "^5.6.3",
+  "wav-decoder": "^1.3.0"
 }
