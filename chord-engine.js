@@ -802,7 +802,446 @@ export function getChordAtTime(
   );
 
 }
+/* =========================================
+   DETECTAR ACORDE A PARTIR DE NOTAS
+========================================= */
 
+export function detectChord(
+  inputNotes
+){
+
+  if(
+    !Array.isArray(inputNotes)
+    ||
+    inputNotes.length < 2
+  ){
+
+    return {
+      valid:false,
+      error:"Notas insuficientes"
+    };
+
+  }
+
+
+  const normalized =
+    inputNotes
+      .map(normalizeNote)
+      .filter(Boolean);
+
+
+  if(
+    normalized.length < 2
+  ){
+
+    return {
+      valid:false,
+      error:"Notas inválidas"
+    };
+
+  }
+
+
+  const unique =
+    [...new Set(normalized)];
+
+
+  const inputIndexes =
+    unique
+      .map(noteIndex);
+
+
+  const candidates = [];
+
+
+  for(
+    let rootIndex = 0;
+    rootIndex < NOTES.length;
+    rootIndex++
+  ){
+
+    for(
+      const [
+        quality,
+        intervals
+      ]
+      of Object.entries(
+        CHORD_TYPES
+      )
+    ){
+
+      /*
+        Evita aliases duplicados
+      */
+
+      if(
+        [
+          "M",
+          "MAJ",
+          "MIN",
+          "+"
+        ].includes(quality)
+      ){
+
+        continue;
+
+      }
+
+
+      const expected =
+        [
+          ...new Set(
+            intervals.map(
+              interval =>
+                (
+                  rootIndex +
+                  interval
+                ) % 12
+            )
+          )
+        ];
+
+
+      const matched =
+        expected.filter(
+          pc =>
+            inputIndexes.includes(pc)
+        );
+
+
+      const missing =
+        expected.filter(
+          pc =>
+            !inputIndexes.includes(pc)
+        );
+
+
+      const extra =
+        inputIndexes.filter(
+          pc =>
+            !expected.includes(pc)
+        );
+
+
+      const coverage =
+        matched.length /
+        expected.length;
+
+
+      const precision =
+        matched.length /
+        inputIndexes.length;
+
+
+      /*
+        Score básico
+      */
+
+      let score =
+        coverage * 0.62
+        +
+        precision * 0.38;
+
+
+      /*
+        Penaliza notas extras
+      */
+
+      score -=
+        extra.length * 0.08;
+
+
+      /*
+        Penaliza notas faltando
+      */
+
+      score -=
+        missing.length * 0.06;
+
+
+      /*
+        Favorece acordes mais simples
+        quando dois resultados forem
+        muito parecidos
+      */
+
+      score -=
+        Math.max(
+          0,
+          expected.length - 4
+        )
+        *
+        0.015;
+
+
+      candidates.push({
+
+        root:
+          NOTES[rootIndex],
+
+        quality,
+
+        expected,
+
+        matched,
+
+        missing,
+
+        extra,
+
+        score
+
+      });
+
+    }
+
+  }
+
+
+  candidates.sort(
+    (a,b) =>
+      b.score -
+      a.score
+  );
+
+
+  const best =
+    candidates[0];
+
+
+  if(
+    !best
+    ||
+    best.score < 0.45
+  ){
+
+    return {
+      valid:false,
+      error:"Nenhum acorde confiável encontrado"
+    };
+
+  }
+
+
+  let symbol =
+    best.root
+    +
+    qualityToSymbol(
+      best.quality
+    );
+
+
+  /*
+    Primeira nota recebida = baixo
+  */
+
+  const bass =
+    normalized[0];
+
+
+  if(
+    bass !== best.root
+    &&
+    best.expected.includes(
+      noteIndex(bass)
+    )
+  ){
+
+    symbol +=
+      "/" + bass;
+
+  }
+
+
+  return {
+
+    valid:true,
+
+    chord:
+      symbol,
+
+    root:
+      best.root,
+
+    bass,
+
+    notes:
+      unique,
+
+    expectedNotes:
+      best.expected.map(
+        index =>
+          NOTES[index]
+      ),
+
+    matchedNotes:
+      best.matched.map(
+        index =>
+          NOTES[index]
+      ),
+
+    missingNotes:
+      best.missing.map(
+        index =>
+          NOTES[index]
+      ),
+
+    extraNotes:
+      best.extra.map(
+        index =>
+          NOTES[index]
+      ),
+
+    confidence:
+      Math.max(
+        0,
+        Math.min(
+          1,
+          Number(
+            best.score.toFixed(3)
+          )
+        )
+      ),
+
+    alternatives:
+      candidates
+        .slice(1,5)
+        .map(
+          item => ({
+
+            chord:
+              item.root
+              +
+              qualityToSymbol(
+                item.quality
+              ),
+
+            confidence:
+              Math.max(
+                0,
+                Math.min(
+                  1,
+                  Number(
+                    item.score.toFixed(3)
+                  )
+                )
+              )
+
+          })
+        )
+
+  };
+
+}
+
+
+/* =========================================
+   QUALIDADE -> SÍMBOLO
+========================================= */
+
+function qualityToSymbol(
+  quality
+){
+
+  const map = {
+
+    "":
+      "",
+
+    "M7":
+      "m7",
+
+    "MIN7":
+      "m7",
+
+    "7":
+      "7",
+
+    "MAJ7":
+      "maj7",
+
+    "MMAJ7":
+      "mMaj7",
+
+    "6":
+      "6",
+
+    "M6":
+      "m6",
+
+    "9":
+      "9",
+
+    "MAJ9":
+      "maj9",
+
+    "M9":
+      "m9",
+
+    "11":
+      "11",
+
+    "M11":
+      "m11",
+
+    "13":
+      "13",
+
+    "M13":
+      "m13",
+
+    "SUS2":
+      "sus2",
+
+    "SUS4":
+      "sus4",
+
+    "DIM":
+      "dim",
+
+    "DIM7":
+      "dim7",
+
+    "M7B5":
+      "m7b5",
+
+    "AUG":
+      "aug",
+
+    "ADD9":
+      "add9",
+
+    "MADD9":
+      "madd9",
+
+    "7SUS4":
+      "7sus4",
+
+    "7B5":
+      "7b5",
+
+    "7#5":
+      "7#5",
+
+    "7B9":
+      "7b9",
+
+    "7#9":
+      "7#9",
+
+    "MAJ7#11":
+      "maj7#11"
+
+  };
+
+
+  return (
+    map[quality]
+    ??
+    quality.toLowerCase()
+  );
+
+}
 
 /* =========================================
    EXPORTAR LISTA DE NOTAS
