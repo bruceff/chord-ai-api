@@ -602,7 +602,126 @@ if(
   return;
 
 }
+/* ================================
+   DETECTAR ACORDE POR NOTAS
+================================ */
 
+if(
+  req.method === "POST"
+  &&
+  req.url === "/detect-chord"
+){
+
+  try{
+
+    const body =
+      await readBody(req);
+
+
+    const notes =
+      body.notes;
+
+
+    const result =
+      detectChord(
+        notes
+      );
+
+
+    sendJson(
+      res,
+      result.valid
+        ? 200
+        : 400,
+      result
+    );
+
+  }
+  catch(error){
+
+    sendJson(
+      res,
+      500,
+      {
+        error:
+          error.message
+      }
+    );
+
+  }
+
+
+  return;
+
+}
+      /* ================================
+   TESTE GET DO DETECTOR
+================================ */
+
+if(
+  req.method === "GET"
+  &&
+  req.url.startsWith(
+    "/detect?"
+  )
+){
+
+  const url =
+    new URL(
+      req.url,
+      "http://localhost"
+    );
+
+
+  const raw =
+    url.searchParams.get(
+      "notes"
+    );
+
+
+  if(!raw){
+
+    sendJson(
+      res,
+      400,
+      {
+        error:
+          "Informe notes"
+      }
+    );
+
+    return;
+
+  }
+
+
+  const notes =
+    raw
+      .split(",")
+      .map(
+        note =>
+          note.trim()
+      );
+
+
+  const result =
+    detectChord(
+      notes
+    );
+
+
+  sendJson(
+    res,
+    result.valid
+      ? 200
+      : 400,
+    result
+  );
+
+
+  return;
+
+}
       /* 404 */
 
       sendJson(
