@@ -9,7 +9,8 @@ import {
 
 import {
   createChromaTest,
-  chromaToNotes
+  chromaToNotes,
+  analyzeWavBuffer
 } from "./audio-engine.js";
 
 const PORT =
@@ -116,7 +117,77 @@ function readBody(req){
             req.destroy();
 
           }
+/* ================================
+   LER BODY BINÁRIO
+================================ */
 
+function readBinaryBody(req){
+
+  return new Promise(
+    (resolve,reject) => {
+
+      const chunks = [];
+
+      let total = 0;
+
+
+      req.on(
+        "data",
+        chunk => {
+
+          total +=
+            chunk.length;
+
+
+          if(
+            total >
+            25 * 1024 * 1024
+          ){
+
+            reject(
+              new Error(
+                "Arquivo muito grande"
+              )
+            );
+
+            req.destroy();
+
+            return;
+
+          }
+
+
+          chunks.push(
+            chunk
+          );
+
+        }
+      );
+
+
+      req.on(
+        "end",
+        () => {
+
+          resolve(
+            Buffer.concat(
+              chunks
+            )
+          );
+
+        }
+      );
+
+
+      req.on(
+        "error",
+        reject
+      );
+
+    }
+  );
+
+}
         }
       );
 
@@ -1043,6 +1114,144 @@ if(
       500,
       {
         error:
+          error.message
+      }
+    );
+
+  }
+
+
+  return;
+
+}
+      /* ================================
+   ANALISAR WAV
+================================ */
+
+if(
+  req.method === "POST"
+  &&
+  req.url === "/analyze-wav"
+){
+
+  try{
+
+    const contentType =
+      req.headers[
+        "content-type"
+      ]
+      ||
+      "";
+
+
+    if(
+      !contentType.includes(
+        "audio/wav"
+      )
+      &&
+      !contentType.includes(
+        "audio/x-wav"
+      )
+      &&
+      !contentType.includes(
+        "application/octet-stream"
+      )
+    ){
+
+      sendJson(
+        res,
+        415,
+        {
+          error:
+            "Envie um arquivo WAV"
+        }
+      );
+
+      return;
+
+    }
+
+
+    const buffer =
+      await readBinaryBody(
+        req
+      );
+
+
+    const audio =
+      await analyzeWavBuffer(
+        buffer,
+        {
+          threshold:0.56,
+          maxNotes:6,
+          frameSize:4096,
+          hopSize:2048
+        }
+      );
+
+
+    const timeline =
+      detectChordTimeline(
+        audio.frames.map(
+          frame => ({
+            time:
+              frame.time,
+
+            notes:
+              frame.notes
+          })
+        )
+      );
+
+
+    sendJson(
+      res,
+      200,
+      {
+
+        success:true,
+
+        audio:{
+
+          sampleRate:
+            audio.sampleRate,
+
+          duration:
+            Number(
+              audio.duration
+                .toFixed(3)
+            ),
+
+          frameCount:
+            audio.frameCount
+
+        },
+
+        chordCount:
+          timeline.length,
+
+        chords:
+          timeline
+
+      }
+    );
+
+  }
+  catch(error){
+
+    console.error(
+      error
+    );
+
+
+    sendJson(
+      res,
+      500,
+      {
+        error:
+          "Falha ao analisar WAV",
+
+        message:
           error.message
       }
     );
