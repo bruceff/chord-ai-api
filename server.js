@@ -1,5 +1,9 @@
 import http from "http";
-
+import {
+  analyzeChord,
+  transposeChord,
+  getNoteNames
+} from "./chord-engine.js";
 const PORT =
   process.env.PORT || 3000;
 
