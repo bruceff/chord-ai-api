@@ -3,7 +3,8 @@ import {
   analyzeChord,
   transposeChord,
   getNoteNames,
-  detectChord
+  detectChord,
+  detectChordTimeline
 } from "./chord-engine.js";
 const PORT =
   process.env.PORT || 3000;
@@ -716,6 +717,163 @@ if(
       ? 200
       : 400,
     result
+  );
+
+
+  return;
+
+}
+      /* ================================
+   TIMELINE DE ACORDES
+================================ */
+
+if(
+  req.method === "POST"
+  &&
+  req.url === "/detect-timeline"
+){
+
+  try{
+
+    const body =
+      await readBody(req);
+
+
+    const frames =
+      body.frames;
+
+
+    if(
+      !Array.isArray(frames)
+    ){
+
+      sendJson(
+        res,
+        400,
+        {
+          error:
+            "frames precisa ser um array"
+        }
+      );
+
+      return;
+
+    }
+
+
+    const chords =
+      detectChordTimeline(
+        frames
+      );
+
+
+    sendJson(
+      res,
+      200,
+      {
+        success:true,
+
+        frameCount:
+          frames.length,
+
+        chordCount:
+          chords.length,
+
+        chords
+      }
+    );
+
+  }
+
+  catch(error){
+
+    sendJson(
+      res,
+      500,
+      {
+        error:
+          error.message
+      }
+    );
+
+  }
+
+
+  return;
+
+}
+
+
+/* ================================
+   TESTE DA TIMELINE
+================================ */
+
+if(
+  req.method === "GET"
+  &&
+  req.url === "/timeline-demo"
+){
+
+  const frames = [
+
+    {
+      time:0,
+      notes:[
+        "C","E","G","B"
+      ]
+    },
+
+    {
+      time:2,
+      notes:[
+        "C","E","G","B"
+      ]
+    },
+
+    {
+      time:4,
+      notes:[
+        "A","C","E","G"
+      ]
+    },
+
+    {
+      time:6,
+      notes:[
+        "A","C","E","G"
+      ]
+    },
+
+    {
+      time:8,
+      notes:[
+        "F","A","C","E"
+      ]
+    },
+
+    {
+      time:10,
+      notes:[
+        "G","B","D","F"
+      ]
+    }
+
+  ];
+
+
+  const chords =
+    detectChordTimeline(
+      frames
+    );
+
+
+  sendJson(
+    res,
+    200,
+    {
+      frames,
+      chords
+    }
   );
 
 
