@@ -1413,6 +1413,475 @@ export function detectChordTimeline(
 
 }
 /* =========================================
+   ESTABILIZAR TIMELINE DE ACORDES
+========================================= */
+
+export function stabilizeChordTimeline(
+  timeline,
+  options = {}
+){
+
+  if(
+    !Array.isArray(timeline)
+    ||
+    timeline.length === 0
+  ){
+    return [];
+  }
+
+
+  const minDuration =
+    Number.isFinite(
+      options.minDuration
+    )
+    ?
+    options.minDuration
+    :
+    0.55;
+
+
+  const mergeGap =
+    Number.isFinite(
+      options.mergeGap
+    )
+    ?
+    options.mergeGap
+    :
+    0.20;
+
+
+  const confidenceThreshold =
+    Number.isFinite(
+      options.confidenceThreshold
+    )
+    ?
+    options.confidenceThreshold
+    :
+    0.48;
+
+
+  let segments =
+    timeline
+      .map(
+        item => ({
+          ...item
+        })
+      )
+      .filter(
+        item =>
+          Number.isFinite(
+            item.start
+          )
+          &&
+          Number.isFinite(
+            item.end
+          )
+          &&
+          item.end >
+          item.start
+      )
+      .sort(
+        (a,b) =>
+          a.start -
+          b.start
+      );
+
+
+  if(
+    segments.length === 0
+  ){
+    return [];
+  }
+
+
+  /* =====================================
+     1. REMOVER ACORDES DE BAIXA CONFIANÇA
+  ===================================== */
+
+  segments =
+    segments.map(
+      segment => {
+
+        if(
+          segment.confidence != null
+          &&
+          segment.confidence <
+          confidenceThreshold
+        ){
+
+          return {
+            ...segment,
+            chord:"N"
+          };
+
+        }
+
+
+        return segment;
+
+      }
+    );
+
+
+  /* =====================================
+     2. PREENCHER BURACOS ENTRE
+        ACORDES IGUAIS
+  ===================================== */
+
+  for(
+    let i = 1;
+    i < segments.length - 1;
+    i++
+  ){
+
+    const previous =
+      segments[i - 1];
+
+    const current =
+      segments[i];
+
+    const next =
+      segments[i + 1];
+
+
+    const duration =
+      current.end -
+      current.start;
+
+
+    if(
+      previous.chord ===
+      next.chord
+      &&
+      current.chord !==
+      previous.chord
+      &&
+      duration <=
+      minDuration
+    ){
+
+      current.chord =
+        previous.chord;
+
+      current.notes =
+        previous.notes;
+
+      current.confidence =
+        Math.max(
+          previous.confidence || 0,
+          next.confidence || 0
+        );
+
+    }
+
+  }
+
+
+  /* =====================================
+     3. ELIMINAR TROCAS MUITO CURTAS
+
+     Se um acorde dura pouco,
+     escolhemos o vizinho mais provável.
+  ===================================== */
+
+  for(
+    let i = 0;
+    i < segments.length;
+    i++
+  ){
+
+    const current =
+      segments[i];
+
+
+    const duration =
+      current.end -
+      current.start;
+
+
+    if(
+      duration >= minDuration
+    ){
+      continue;
+    }
+
+
+    const previous =
+      i > 0
+      ?
+      segments[i - 1]
+      :
+      null;
+
+
+    const next =
+      i <
+      segments.length - 1
+      ?
+      segments[i + 1]
+      :
+      null;
+
+
+    if(
+      previous
+      &&
+      next
+    ){
+
+      if(
+        previous.chord ===
+        next.chord
+      ){
+
+        current.chord =
+          previous.chord;
+
+        current.notes =
+          previous.notes;
+
+        continue;
+
+      }
+
+
+      const previousConfidence =
+        previous.confidence || 0;
+
+
+      const nextConfidence =
+        next.confidence || 0;
+
+
+      if(
+        previousConfidence >=
+        nextConfidence
+      ){
+
+        current.chord =
+          previous.chord;
+
+        current.notes =
+          previous.notes;
+
+        current.confidence =
+          previousConfidence;
+
+      }
+
+      else{
+
+        current.chord =
+          next.chord;
+
+        current.notes =
+          next.notes;
+
+        current.confidence =
+          nextConfidence;
+
+      }
+
+    }
+
+    else if(previous){
+
+      current.chord =
+        previous.chord;
+
+      current.notes =
+        previous.notes;
+
+      current.confidence =
+        previous.confidence;
+
+    }
+
+    else if(next){
+
+      current.chord =
+        next.chord;
+
+      current.notes =
+        next.notes;
+
+      current.confidence =
+        next.confidence;
+
+    }
+
+  }
+
+
+  /* =====================================
+     4. JUNTAR ACORDES IGUAIS
+  ===================================== */
+
+  const merged = [];
+
+
+  for(
+    const segment
+    of segments
+  ){
+
+    const previous =
+      merged[
+        merged.length - 1
+      ];
+
+
+    if(
+      previous
+      &&
+      previous.chord ===
+      segment.chord
+      &&
+      (
+        segment.start -
+        previous.end
+      )
+      <= mergeGap
+    ){
+
+      previous.end =
+        segment.end;
+
+
+      const a =
+        previous.confidence || 0;
+
+      const b =
+        segment.confidence || 0;
+
+
+      previous.confidence =
+        Number(
+          (
+            (a + b)
+            /
+            2
+          )
+          .toFixed(3)
+        );
+
+
+      continue;
+
+    }
+
+
+    merged.push({
+      ...segment
+    });
+
+  }
+
+
+  /* =====================================
+     5. REMOVER "N" MUITO CURTO
+  ===================================== */
+
+  for(
+    let i = 1;
+    i < merged.length - 1;
+    i++
+  ){
+
+    const current =
+      merged[i];
+
+
+    if(
+      current.chord !== "N"
+    ){
+      continue;
+    }
+
+
+    const duration =
+      current.end -
+      current.start;
+
+
+    if(
+      duration >
+      minDuration
+    ){
+      continue;
+    }
+
+
+    const previous =
+      merged[i - 1];
+
+    const next =
+      merged[i + 1];
+
+
+    if(
+      previous.chord ===
+      next.chord
+    ){
+
+      current.chord =
+        previous.chord;
+
+      current.notes =
+        previous.notes;
+
+      current.confidence =
+        previous.confidence;
+
+    }
+
+  }
+
+
+  /* =====================================
+     6. JUNÇÃO FINAL
+  ===================================== */
+
+  const finalTimeline = [];
+
+
+  for(
+    const segment
+    of merged
+  ){
+
+    const previous =
+      finalTimeline[
+        finalTimeline.length - 1
+      ];
+
+
+    if(
+      previous
+      &&
+      previous.chord ===
+      segment.chord
+    ){
+
+      previous.end =
+        segment.end;
+
+      continue;
+
+    }
+
+
+    finalTimeline.push({
+      ...segment
+    });
+
+  }
+
+
+  return finalTimeline;
+
+}
+/* =========================================
    EXPORTAR LISTA DE NOTAS
 ========================================= */
 
