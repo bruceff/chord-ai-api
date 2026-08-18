@@ -330,16 +330,7 @@ const server =
 
 }
 
-        res.writeHead(
-          204,
-          corsHeaders()
-        );
-
-        res.end();
-
-        return;
-
-      }
+        
 
 
       /* HOME */
