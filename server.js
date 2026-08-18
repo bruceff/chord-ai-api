@@ -5,7 +5,8 @@ import {
   transposeChord,
   getNoteNames,
   detectChord,
-  detectChordTimeline
+  detectChordTimeline,
+  stabilizeChordTimeline
 } from "./chord-engine.js";
 
 import {
@@ -66,7 +67,6 @@ function sendJson(
     corsHeaders()
   );
 
-
   res.end(
     JSON.stringify(
       data,
@@ -115,7 +115,6 @@ function readBody(req){
           if(finished)
             return;
 
-
           body += chunk;
 
 
@@ -126,13 +125,11 @@ function readBody(req){
 
             finished = true;
 
-
             reject(
               new Error(
                 "Body muito grande"
               )
             );
-
 
             req.destroy();
 
@@ -148,7 +145,6 @@ function readBody(req){
 
           if(finished)
             return;
-
 
           finished = true;
 
@@ -184,7 +180,6 @@ function readBody(req){
 
           if(finished)
             return;
-
 
           finished = true;
 
@@ -227,11 +222,6 @@ function readBinaryBody(req){
             chunk.length;
 
 
-          /*
-            Limite temporário:
-            25 MB
-          */
-
           if(
             total >
             25 * 1024 * 1024
@@ -239,13 +229,11 @@ function readBinaryBody(req){
 
             finished = true;
 
-
             reject(
               new Error(
                 "Arquivo muito grande"
               )
             );
-
 
             req.destroy();
 
@@ -269,7 +257,6 @@ function readBinaryBody(req){
           if(finished)
             return;
 
-
           finished = true;
 
 
@@ -289,7 +276,6 @@ function readBinaryBody(req){
 
           if(finished)
             return;
-
 
           finished = true;
 
@@ -382,11 +368,6 @@ const server =
 
     async (req,res) => {
 
-      /*
-        Log simples para ajudar
-        nos testes do Render.
-      */
-
       console.log(
         `${req.method} ${req.url}`
       );
@@ -397,8 +378,7 @@ const server =
       ===================================== */
 
       if(
-        req.method ===
-        "OPTIONS"
+        req.method === "OPTIONS"
       ){
 
         res.writeHead(
@@ -450,7 +430,13 @@ const server =
               "online",
 
             version:
-              "1.0.0"
+              "1.1.0",
+
+            audioEngine:
+              true,
+
+            stabilization:
+              true
 
           }
         );
@@ -480,7 +466,10 @@ const server =
               "ok",
 
             service:
-              "chord-ai-api"
+              "chord-ai-api",
+
+            audioEngine:
+              "online"
 
           }
         );
@@ -530,7 +519,6 @@ const server =
               }
             );
 
-
             return;
 
           }
@@ -541,13 +529,6 @@ const server =
               videoId
             );
 
-
-          /*
-            Ainda não fazemos download
-            ou análise do áudio do YouTube.
-
-            Essa rota identifica o vídeo.
-          */
 
           sendJson(
             res,
@@ -657,7 +638,6 @@ const server =
               }
             );
 
-
             return;
 
           }
@@ -751,7 +731,6 @@ const server =
 
             }
           );
-
 
           return;
 
@@ -908,7 +887,6 @@ const server =
             }
           );
 
-
           return;
 
         }
@@ -982,15 +960,32 @@ const server =
               }
             );
 
-
             return;
 
           }
 
 
-          const chords =
+          const rawTimeline =
             detectChordTimeline(
               frames
+            );
+
+
+          const timeline =
+            stabilizeChordTimeline(
+              rawTimeline,
+              {
+
+                minDuration:
+                  0.55,
+
+                mergeGap:
+                  0.20,
+
+                confidenceThreshold:
+                  0.48
+
+              }
             );
 
 
@@ -1005,10 +1000,14 @@ const server =
               frameCount:
                 frames.length,
 
-              chordCount:
-                chords.length,
+              rawChordCount:
+                rawTimeline.length,
 
-              chords
+              chordCount:
+                timeline.length,
+
+              chords:
+                timeline
 
             }
           );
@@ -1111,9 +1110,15 @@ const server =
         ];
 
 
-        const chords =
+        const rawTimeline =
           detectChordTimeline(
             frames
+          );
+
+
+        const timeline =
+          stabilizeChordTimeline(
+            rawTimeline
           );
 
 
@@ -1124,7 +1129,9 @@ const server =
 
             frames,
 
-            chords
+            rawTimeline,
+
+            timeline
 
           }
         );
@@ -1172,7 +1179,6 @@ const server =
 
             }
           );
-
 
           return;
 
@@ -1252,7 +1258,6 @@ const server =
 
               }
             );
-
 
             return;
 
@@ -1370,16 +1375,10 @@ const server =
               }
             );
 
-
             return;
 
           }
 
-
-          /*
-            AGORA readBinaryBody existe
-            no escopo correto.
-          */
 
           const buffer =
             await readBinaryBody(
@@ -1403,7 +1402,6 @@ const server =
 
               }
             );
-
 
             return;
 
@@ -1436,13 +1434,7 @@ const server =
             );
 
 
-          /*
-            Transformamos os frames
-            encontrados pelo Audio Engine
-            em uma timeline de acordes.
-          */
-
-          const timeline =
+          const rawTimeline =
             detectChordTimeline(
 
               audio.frames.map(
@@ -1460,6 +1452,24 @@ const server =
             );
 
 
+          const timeline =
+            stabilizeChordTimeline(
+              rawTimeline,
+              {
+
+                minDuration:
+                  0.55,
+
+                mergeGap:
+                  0.20,
+
+                confidenceThreshold:
+                  0.48
+
+              }
+            );
+
+
           sendJson(
             res,
             200,
@@ -1470,6 +1480,9 @@ const server =
 
               engine:
                 "Chord AI Audio Engine",
+
+              stabilization:
+                true,
 
               audio:{
 
@@ -1486,6 +1499,9 @@ const server =
                   audio.frameCount
 
               },
+
+              rawChordCount:
+                rawTimeline.length,
 
               chordCount:
                 timeline.length,
@@ -1533,8 +1549,6 @@ const server =
 
       /* =====================================
          404
-
-         DEVE CONTINUAR SENDO A ÚLTIMA ROTA
       ===================================== */
 
       sendJson(
@@ -1580,6 +1594,10 @@ server.listen(
 
     console.log(
       "Audio Engine: disponível"
+    );
+
+    console.log(
+      "Timeline Stabilizer: disponível"
     );
 
     console.log(
