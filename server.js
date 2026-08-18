@@ -26,7 +26,7 @@ function corsHeaders(){
   return {
 
     "Access-Control-Allow-Origin":
-      "*",
+      "https://bruceff.github.io",
 
     "Access-Control-Allow-Methods":
       "GET, POST, OPTIONS",
@@ -34,13 +34,15 @@ function corsHeaders(){
     "Access-Control-Allow-Headers":
       "Content-Type",
 
+    "Access-Control-Max-Age":
+      "86400",
+
     "Content-Type":
       "application/json; charset=utf-8"
 
   };
 
 }
-
 
 /* ================================
    RESPOSTA JSON
@@ -302,9 +304,31 @@ const server =
       /* OPTIONS / CORS */
 
       if(
-        req.method ===
-        "OPTIONS"
-      ){
+  req.method === "OPTIONS"
+){
+
+  res.writeHead(
+    204,
+    {
+      "Access-Control-Allow-Origin":
+        "https://bruceff.github.io",
+
+      "Access-Control-Allow-Methods":
+        "GET, POST, OPTIONS",
+
+      "Access-Control-Allow-Headers":
+        "Content-Type",
+
+      "Access-Control-Max-Age":
+        "86400"
+    }
+  );
+
+  res.end();
+
+  return;
+
+}
 
         res.writeHead(
           204,
