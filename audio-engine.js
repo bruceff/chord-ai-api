@@ -1,5 +1,5 @@
 import Meyda from "meyda";
-
+import WavDecoder from "wav-decoder";
 
 /* =========================================
    CHORD AI — AUDIO ENGINE
@@ -628,6 +628,271 @@ export function createChromaTest(
           threshold:0.5
         }
       )
+
+  };
+
+}
+/* =========================================
+   DECODIFICAR WAV
+========================================= */
+
+export async function decodeWavBuffer(
+  buffer
+){
+
+  if(
+    !buffer
+    ||
+    buffer.length === 0
+  ){
+
+    throw new Error(
+      "Áudio vazio"
+    );
+
+  }
+
+
+  const arrayBuffer =
+    buffer.buffer.slice(
+      buffer.byteOffset,
+      buffer.byteOffset + buffer.byteLength
+    );
+
+
+  const decoded =
+    await WavDecoder.decode(
+      arrayBuffer
+    );
+
+
+  if(
+    !decoded
+    ||
+    !decoded.sampleRate
+    ||
+    !Array.isArray(
+      decoded.channelData
+    )
+    ||
+    decoded.channelData.length === 0
+  ){
+
+    throw new Error(
+      "WAV inválido"
+    );
+
+  }
+
+
+  return decoded;
+
+}
+
+
+/* =========================================
+   CONVERTER PARA MONO
+========================================= */
+
+export function toMono(
+  channelData
+){
+
+  if(
+    !Array.isArray(
+      channelData
+    )
+    ||
+    channelData.length === 0
+  ){
+
+    return new Float32Array();
+  }
+
+
+  if(
+    channelData.length === 1
+  ){
+
+    return channelData[0];
+  }
+
+
+  const length =
+    channelData[0].length;
+
+
+  const mono =
+    new Float32Array(
+      length
+    );
+
+
+  for(
+    let channel = 0;
+    channel < channelData.length;
+    channel++
+  ){
+
+    const samples =
+      channelData[channel];
+
+
+    for(
+      let i = 0;
+      i < length;
+      i++
+    ){
+
+      mono[i] +=
+        samples[i]
+        /
+        channelData.length;
+
+    }
+
+  }
+
+
+  return mono;
+
+}
+
+
+/* =========================================
+   ANALISAR WAV COMPLETO
+========================================= */
+
+export async function analyzeWavBuffer(
+  buffer,
+  options = {}
+){
+
+  const decoded =
+    await decodeWavBuffer(
+      buffer
+    );
+
+
+  const sampleRate =
+    decoded.sampleRate;
+
+
+  const mono =
+    toMono(
+      decoded.channelData
+    );
+
+
+  const frameSize =
+    Number.isFinite(
+      options.frameSize
+    )
+    ?
+    Math.floor(
+      options.frameSize
+    )
+    :
+    4096;
+
+
+  const hopSize =
+    Number.isFinite(
+      options.hopSize
+    )
+    ?
+    Math.floor(
+      options.hopSize
+    )
+    :
+    2048;
+
+
+  const frames = [];
+
+
+  for(
+    let start = 0;
+    start + frameSize <= mono.length;
+    start += hopSize
+  ){
+
+    const end =
+      start + frameSize;
+
+
+    const samples =
+      mono.slice(
+        start,
+        end
+      );
+
+
+    const analysis =
+      analyzeAudioFrame(
+        samples,
+        sampleRate,
+        options
+      );
+
+
+    if(
+      !analysis.valid
+    ){
+
+      continue;
+
+    }
+
+
+    frames.push({
+
+      time:
+        start
+        /
+        sampleRate,
+
+      chroma:
+        analysis.chroma,
+
+      notes:
+        analysis.notes,
+
+      rms:
+        analysis.rms,
+
+      spectralCentroid:
+        analysis.spectralCentroid,
+
+      spectralFlatness:
+        analysis.spectralFlatness
+
+    });
+
+  }
+
+
+  const smoothed =
+    smoothChromaFrames(
+      frames,
+      2
+    );
+
+
+  return {
+
+    sampleRate,
+
+    duration:
+      mono.length
+      /
+      sampleRate,
+
+    frameCount:
+      smoothed.length,
+
+    frames:
+      smoothed
 
   };
 
