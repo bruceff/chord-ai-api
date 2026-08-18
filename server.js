@@ -6,6 +6,12 @@ import {
   detectChord,
   detectChordTimeline
 } from "./chord-engine.js";
+
+import {
+  createChromaTest,
+  chromaToNotes
+} from "./audio-engine.js";
+
 const PORT =
   process.env.PORT || 3000;
 
@@ -875,6 +881,173 @@ if(
       chords
     }
   );
+
+
+  return;
+
+}
+      /* ================================
+   TESTAR CHROMA -> NOTAS
+================================ */
+
+if(
+  req.method === "GET"
+  &&
+  req.url.startsWith(
+    "/chroma-test?"
+  )
+){
+
+  const url =
+    new URL(
+      req.url,
+      "http://localhost"
+    );
+
+
+  const rawNotes =
+    url.searchParams.get(
+      "notes"
+    );
+
+
+  if(!rawNotes){
+
+    sendJson(
+      res,
+      400,
+      {
+        error:
+          "Informe notes"
+      }
+    );
+
+    return;
+
+  }
+
+
+  const notes =
+    rawNotes
+      .split(",")
+      .map(
+        note =>
+          note.trim()
+      );
+
+
+  const result =
+    createChromaTest(
+      notes
+    );
+
+
+  sendJson(
+    res,
+    200,
+    {
+
+      success:true,
+
+      input:
+        notes,
+
+      result
+
+    }
+  );
+
+
+  return;
+
+}
+
+
+/* ================================
+   DETECTAR NOTAS A PARTIR DE CHROMA
+================================ */
+
+if(
+  req.method === "POST"
+  &&
+  req.url === "/chroma-to-notes"
+){
+
+  try{
+
+    const body =
+      await readBody(req);
+
+
+    if(
+      !Array.isArray(
+        body.chroma
+      )
+      ||
+      body.chroma.length !== 12
+    ){
+
+      sendJson(
+        res,
+        400,
+        {
+          error:
+            "chroma precisa ter 12 valores"
+        }
+      );
+
+      return;
+
+    }
+
+
+    const notes =
+      chromaToNotes(
+        body.chroma,
+        {
+
+          threshold:
+            Number.isFinite(
+              Number(
+                body.threshold
+              )
+            )
+            ?
+            Number(
+              body.threshold
+            )
+            :
+            0.58
+
+        }
+      );
+
+
+    sendJson(
+      res,
+      200,
+      {
+
+        success:true,
+
+        notes
+
+      }
+    );
+
+  }
+  catch(error){
+
+    sendJson(
+      res,
+      500,
+      {
+        error:
+          error.message
+      }
+    );
+
+  }
 
 
   return;
