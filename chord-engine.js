@@ -1242,7 +1242,176 @@ function qualityToSymbol(
   );
 
 }
+/* =========================================
+   DETECTAR TIMELINE DE ACORDES
+========================================= */
 
+export function detectChordTimeline(
+  frames
+){
+
+  if(
+    !Array.isArray(frames)
+    ||
+    frames.length === 0
+  ){
+    return [];
+  }
+
+
+  const normalizedFrames =
+    frames
+      .map(
+        frame => {
+
+          const time =
+            Number(frame.time);
+
+
+          if(
+            !Number.isFinite(time)
+          ){
+            return null;
+          }
+
+
+          const detection =
+            detectChord(
+              frame.notes
+            );
+
+
+          return {
+            time,
+            detection
+          };
+
+        }
+      )
+      .filter(Boolean)
+      .sort(
+        (a,b) =>
+          a.time - b.time
+      );
+
+
+  if(
+    normalizedFrames.length === 0
+  ){
+    return [];
+  }
+
+
+  const rawSegments = [];
+
+
+  for(
+    let i = 0;
+    i < normalizedFrames.length;
+    i++
+  ){
+
+    const current =
+      normalizedFrames[i];
+
+    const next =
+      normalizedFrames[i + 1];
+
+    const start =
+      current.time;
+
+    const end =
+      next
+      ? next.time
+      : start + 1;
+
+    const detection =
+      current.detection;
+
+
+    rawSegments.push({
+
+      start,
+
+      end,
+
+      chord:
+        detection.valid
+        ? detection.chord
+        : "N",
+
+      notes:
+        detection.valid
+        ? detection.expectedNotes
+        : [],
+
+      confidence:
+        detection.valid
+        ? detection.confidence
+        : 0
+
+    });
+
+  }
+
+
+  /*
+    Junta blocos consecutivos
+    que possuem o mesmo acorde.
+  */
+
+  const merged = [];
+
+
+  for(
+    const segment of rawSegments
+  ){
+
+    const previous =
+      merged[
+        merged.length - 1
+      ];
+
+
+    if(
+      previous
+      &&
+      previous.chord ===
+      segment.chord
+    ){
+
+      previous.end =
+        segment.end;
+
+
+      previous.confidence =
+        Number(
+          (
+            (
+              previous.confidence
+              +
+              segment.confidence
+            )
+            / 2
+          ).toFixed(3)
+        );
+
+    }
+
+    else{
+
+      merged.push({
+        ...segment
+      });
+
+    }
+
+  }
+
+
+  return merged;
+
+}
 /* =========================================
    EXPORTAR LISTA DE NOTAS
 ========================================= */
