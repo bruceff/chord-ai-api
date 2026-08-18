@@ -1,4 +1,5 @@
 import http from "http";
+
 import {
   analyzeChord,
   transposeChord,
@@ -13,20 +14,25 @@ import {
   analyzeWavBuffer
 } from "./audio-engine.js";
 
+
+/* =========================================
+   CONFIGURAÇÃO
+========================================= */
+
 const PORT =
   process.env.PORT || 3000;
 
 
-/* ================================
+/* =========================================
    CORS
-================================ */
+========================================= */
 
 function corsHeaders(){
 
   return {
 
     "Access-Control-Allow-Origin":
-      "https://bruceff.github.io",
+      "*",
 
     "Access-Control-Allow-Methods":
       "GET, POST, OPTIONS",
@@ -44,9 +50,10 @@ function corsHeaders(){
 
 }
 
-/* ================================
-   RESPOSTA JSON
-================================ */
+
+/* =========================================
+   ENVIAR JSON
+========================================= */
 
 function sendJson(
   res,
@@ -59,6 +66,7 @@ function sendJson(
     corsHeaders()
   );
 
+
   res.end(
     JSON.stringify(
       data,
@@ -70,9 +78,9 @@ function sendJson(
 }
 
 
-/* ================================
+/* =========================================
    VALIDAR VIDEO ID
-================================ */
+========================================= */
 
 function validVideoId(id){
 
@@ -86,9 +94,9 @@ function validVideoId(id){
 }
 
 
-/* ================================
-   LER BODY
-================================ */
+/* =========================================
+   LER BODY JSON
+========================================= */
 
 function readBody(req){
 
@@ -97,10 +105,16 @@ function readBody(req){
 
       let body = "";
 
+      let finished = false;
+
 
       req.on(
         "data",
         chunk => {
+
+          if(finished)
+            return;
+
 
           body += chunk;
 
@@ -110,93 +124,34 @@ function readBody(req){
             1_000_000
           ){
 
+            finished = true;
+
+
             reject(
               new Error(
                 "Body muito grande"
               )
             );
 
+
             req.destroy();
 
           }
-/* ================================
-   LER BODY BINÁRIO
-================================ */
 
-function readBinaryBody(req){
-
-  return new Promise(
-    (resolve,reject) => {
-
-      const chunks = [];
-
-      let total = 0;
+        }
+      );
 
 
       req.on(
-        "data",
-        chunk => {
+        "end",
+        () => {
 
-          total +=
-            chunk.length;
-
-
-          if(
-            total >
-            25 * 1024 * 1024
-          ){
-
-            reject(
-              new Error(
-                "Arquivo muito grande"
-              )
-            );
-
-            req.destroy();
-
+          if(finished)
             return;
 
-          }
 
+          finished = true;
 
-          chunks.push(
-            chunk
-          );
-
-        }
-      );
-
-
-      req.on(
-        "end",
-        () => {
-
-          resolve(
-            Buffer.concat(
-              chunks
-            )
-          );
-
-        }
-      );
-
-
-      req.on(
-        "error",
-        reject
-      );
-
-    }
-  );
-
-}
-        }
-      );
-
-
-      req.on(
-        "end",
-        () => {
 
           try{
 
@@ -222,15 +177,136 @@ function readBinaryBody(req){
         }
       );
 
+
+      req.on(
+        "error",
+        error => {
+
+          if(finished)
+            return;
+
+
+          finished = true;
+
+          reject(error);
+
+        }
+      );
+
     }
   );
 
 }
 
 
-/* ================================
+/* =========================================
+   LER BODY BINÁRIO
+========================================= */
+
+function readBinaryBody(req){
+
+  return new Promise(
+    (resolve,reject) => {
+
+      const chunks = [];
+
+      let total = 0;
+
+      let finished = false;
+
+
+      req.on(
+        "data",
+        chunk => {
+
+          if(finished)
+            return;
+
+
+          total +=
+            chunk.length;
+
+
+          /*
+            Limite temporário:
+            25 MB
+          */
+
+          if(
+            total >
+            25 * 1024 * 1024
+          ){
+
+            finished = true;
+
+
+            reject(
+              new Error(
+                "Arquivo muito grande"
+              )
+            );
+
+
+            req.destroy();
+
+            return;
+
+          }
+
+
+          chunks.push(
+            chunk
+          );
+
+        }
+      );
+
+
+      req.on(
+        "end",
+        () => {
+
+          if(finished)
+            return;
+
+
+          finished = true;
+
+
+          resolve(
+            Buffer.concat(
+              chunks
+            )
+          );
+
+        }
+      );
+
+
+      req.on(
+        "error",
+        error => {
+
+          if(finished)
+            return;
+
+
+          finished = true;
+
+          reject(error);
+
+        }
+      );
+
+    }
+  );
+
+}
+
+
+/* =========================================
    METADADOS DO YOUTUBE
-================================ */
+========================================= */
 
 async function getYoutubeMetadata(
   videoId
@@ -255,10 +331,14 @@ async function getYoutubeMetadata(
 
 
   const response =
-    await fetch(endpoint);
+    await fetch(
+      endpoint
+    );
 
 
-  if(!response.ok){
+  if(
+    !response.ok
+  ){
 
     throw new Error(
       "Não foi possível localizar o vídeo"
@@ -293,47 +373,64 @@ async function getYoutubeMetadata(
 }
 
 
-/* ================================
+/* =========================================
    SERVIDOR
-================================ */
+========================================= */
 
 const server =
   http.createServer(
+
     async (req,res) => {
 
-      /* OPTIONS / CORS */
+      /*
+        Log simples para ajudar
+        nos testes do Render.
+      */
+
+      console.log(
+        `${req.method} ${req.url}`
+      );
+
+
+      /* =====================================
+         PREFLIGHT / CORS
+      ===================================== */
 
       if(
-  req.method === "OPTIONS"
-){
+        req.method ===
+        "OPTIONS"
+      ){
 
-  res.writeHead(
-    204,
-    {
-      "Access-Control-Allow-Origin":
-        "https://bruceff.github.io",
+        res.writeHead(
+          204,
+          {
 
-      "Access-Control-Allow-Methods":
-        "GET, POST, OPTIONS",
+            "Access-Control-Allow-Origin":
+              "*",
 
-      "Access-Control-Allow-Headers":
-        "Content-Type",
+            "Access-Control-Allow-Methods":
+              "GET, POST, OPTIONS",
 
-      "Access-Control-Max-Age":
-        "86400"
-    }
-  );
+            "Access-Control-Allow-Headers":
+              "Content-Type",
 
-  res.end();
+            "Access-Control-Max-Age":
+              "86400"
 
-  return;
-
-}
-
-        
+          }
+        );
 
 
-      /* HOME */
+        res.end();
+
+        return;
+
+      }
+
+
+      /* =====================================
+         HOME
+      ===================================== */
 
       if(
         req.method === "GET"
@@ -358,12 +455,15 @@ const server =
           }
         );
 
+
         return;
 
       }
 
 
-      /* HEALTH */
+      /* =====================================
+         HEALTH
+      ===================================== */
 
       if(
         req.method === "GET"
@@ -385,12 +485,15 @@ const server =
           }
         );
 
+
         return;
 
       }
 
 
-      /* ANALYZE */
+      /* =====================================
+         ANALYZE YOUTUBE
+      ===================================== */
 
       if(
         req.method === "POST"
@@ -401,7 +504,9 @@ const server =
         try{
 
           const body =
-            await readBody(req);
+            await readBody(
+              req
+            );
 
 
           const videoId =
@@ -425,18 +530,10 @@ const server =
               }
             );
 
+
             return;
 
           }
-
-
-          /*
-            Nesta etapa ainda não
-            analisamos acordes.
-
-            Primeiro confirmamos:
-            Site -> API -> YouTube metadata
-          */
 
 
           const metadata =
@@ -444,6 +541,13 @@ const server =
               videoId
             );
 
+
+          /*
+            Ainda não fazemos download
+            ou análise do áudio do YouTube.
+
+            Essa rota identifica o vídeo.
+          */
 
           sendJson(
             res,
@@ -465,7 +569,7 @@ const server =
                   false,
 
                 message:
-                  "Motor musical ainda não conectado."
+                  "Motor musical para YouTube ainda não conectado."
 
               },
 
@@ -481,11 +585,12 @@ const server =
             }
           );
 
-
         }
+
         catch(error){
 
           console.error(
+            "Erro /analyze:",
             error
           );
 
@@ -510,774 +615,927 @@ const server =
         return;
 
       }
-/* ================================
-   TESTAR MOTOR MUSICAL
-================================ */
-
-if(
-  req.method === "GET"
-  &&
-  req.url.startsWith(
-    "/chord?"
-  )
-){
-
-  try{
-
-    const url =
-      new URL(
-        req.url,
-        "http://localhost"
-      );
 
 
-    const name =
-      url.searchParams.get(
-        "name"
-      );
+      /* =====================================
+         ANALISAR NOME DE ACORDE
+      ===================================== */
+
+      if(
+        req.method === "GET"
+        &&
+        req.url.startsWith(
+          "/chord?"
+        )
+      ){
+
+        try{
+
+          const url =
+            new URL(
+              req.url,
+              "http://localhost"
+            );
 
 
-    if(!name){
+          const name =
+            url.searchParams.get(
+              "name"
+            );
 
-      sendJson(
-        res,
-        400,
-        {
-          error:
-            "Informe um acorde"
+
+          if(!name){
+
+            sendJson(
+              res,
+              400,
+              {
+
+                error:
+                  "Informe um acorde"
+
+              }
+            );
+
+
+            return;
+
+          }
+
+
+          const result =
+            analyzeChord(
+              name
+            );
+
+
+          sendJson(
+            res,
+            result.valid
+              ? 200
+              : 400,
+            result
+          );
+
         }
-      );
 
-      return;
+        catch(error){
 
-    }
+          sendJson(
+            res,
+            500,
+            {
 
+              error:
+                error.message
 
-    const result =
-      analyzeChord(
-        name
-      );
+            }
+          );
 
-
-    sendJson(
-      res,
-      result.valid
-        ? 200
-        : 400,
-      result
-    );
-
-
-  }
-  catch(error){
-
-    sendJson(
-      res,
-      500,
-      {
-        error:
-          error.message
-      }
-    );
-
-  }
-
-
-  return;
-
-}
-
-
-
-/* ================================
-   TRANSPOR ACORDE
-================================ */
-
-if(
-  req.method === "GET"
-  &&
-  req.url.startsWith(
-    "/transpose?"
-  )
-){
-
-  const url =
-    new URL(
-      req.url,
-      "http://localhost"
-    );
-
-
-  const chord =
-    url.searchParams.get(
-      "chord"
-    );
-
-
-  const semitones =
-    Number(
-      url.searchParams.get(
-        "semitones"
-      )
-    );
-
-
-  if(
-    !chord
-    ||
-    !Number.isFinite(
-      semitones
-    )
-  ){
-
-    sendJson(
-      res,
-      400,
-      {
-        error:
-          "Parâmetros inválidos"
-      }
-    );
-
-    return;
-
-  }
-
-
-  const result =
-    transposeChord(
-      chord,
-      semitones
-    );
-
-
-  sendJson(
-    res,
-    result
-      ? 200
-      : 400,
-    {
-      original:
-        chord,
-
-      semitones,
-
-      result
-    }
-  );
-
-
-  return;
-
-}
-
-
-
-/* ================================
-   NOTAS DISPONÍVEIS
-================================ */
-
-if(
-  req.method === "GET"
-  &&
-  req.url === "/notes"
-){
-
-  sendJson(
-    res,
-    200,
-    {
-      notes:
-        getNoteNames()
-    }
-  );
-
-  return;
-
-}
-/* ================================
-   DETECTAR ACORDE POR NOTAS
-================================ */
-
-if(
-  req.method === "POST"
-  &&
-  req.url === "/detect-chord"
-){
-
-  try{
-
-    const body =
-      await readBody(req);
-
-
-    const notes =
-      body.notes;
-
-
-    const result =
-      detectChord(
-        notes
-      );
-
-
-    sendJson(
-      res,
-      result.valid
-        ? 200
-        : 400,
-      result
-    );
-
-  }
-  catch(error){
-
-    sendJson(
-      res,
-      500,
-      {
-        error:
-          error.message
-      }
-    );
-
-  }
-
-
-  return;
-
-}
-      /* ================================
-   TESTE GET DO DETECTOR
-================================ */
-
-if(
-  req.method === "GET"
-  &&
-  req.url.startsWith(
-    "/detect?"
-  )
-){
-
-  const url =
-    new URL(
-      req.url,
-      "http://localhost"
-    );
-
-
-  const raw =
-    url.searchParams.get(
-      "notes"
-    );
-
-
-  if(!raw){
-
-    sendJson(
-      res,
-      400,
-      {
-        error:
-          "Informe notes"
-      }
-    );
-
-    return;
-
-  }
-
-
-  const notes =
-    raw
-      .split(",")
-      .map(
-        note =>
-          note.trim()
-      );
-
-
-  const result =
-    detectChord(
-      notes
-    );
-
-
-  sendJson(
-    res,
-    result.valid
-      ? 200
-      : 400,
-    result
-  );
-
-
-  return;
-
-}
-      /* ================================
-   TIMELINE DE ACORDES
-================================ */
-
-if(
-  req.method === "POST"
-  &&
-  req.url === "/detect-timeline"
-){
-
-  try{
-
-    const body =
-      await readBody(req);
-
-
-    const frames =
-      body.frames;
-
-
-    if(
-      !Array.isArray(frames)
-    ){
-
-      sendJson(
-        res,
-        400,
-        {
-          error:
-            "frames precisa ser um array"
         }
-      );
-
-      return;
-
-    }
 
 
-    const chords =
-      detectChordTimeline(
-        frames
-      );
+        return;
 
-
-    sendJson(
-      res,
-      200,
-      {
-        success:true,
-
-        frameCount:
-          frames.length,
-
-        chordCount:
-          chords.length,
-
-        chords
       }
-    );
-
-  }
-
-  catch(error){
-
-    sendJson(
-      res,
-      500,
-      {
-        error:
-          error.message
-      }
-    );
-
-  }
 
 
-  return;
+      /* =====================================
+         TRANSPOR ACORDE
+      ===================================== */
 
-}
+      if(
+        req.method === "GET"
+        &&
+        req.url.startsWith(
+          "/transpose?"
+        )
+      ){
 
-
-/* ================================
-   TESTE DA TIMELINE
-================================ */
-
-if(
-  req.method === "GET"
-  &&
-  req.url === "/timeline-demo"
-){
-
-  const frames = [
-
-    {
-      time:0,
-      notes:[
-        "C","E","G","B"
-      ]
-    },
-
-    {
-      time:2,
-      notes:[
-        "C","E","G","B"
-      ]
-    },
-
-    {
-      time:4,
-      notes:[
-        "A","C","E","G"
-      ]
-    },
-
-    {
-      time:6,
-      notes:[
-        "A","C","E","G"
-      ]
-    },
-
-    {
-      time:8,
-      notes:[
-        "F","A","C","E"
-      ]
-    },
-
-    {
-      time:10,
-      notes:[
-        "G","B","D","F"
-      ]
-    }
-
-  ];
+        const url =
+          new URL(
+            req.url,
+            "http://localhost"
+          );
 
 
-  const chords =
-    detectChordTimeline(
-      frames
-    );
+        const chord =
+          url.searchParams.get(
+            "chord"
+          );
 
 
-  sendJson(
-    res,
-    200,
-    {
-      frames,
-      chords
-    }
-  );
-
-
-  return;
-
-}
-      /* ================================
-   TESTAR CHROMA -> NOTAS
-================================ */
-
-if(
-  req.method === "GET"
-  &&
-  req.url.startsWith(
-    "/chroma-test?"
-  )
-){
-
-  const url =
-    new URL(
-      req.url,
-      "http://localhost"
-    );
-
-
-  const rawNotes =
-    url.searchParams.get(
-      "notes"
-    );
-
-
-  if(!rawNotes){
-
-    sendJson(
-      res,
-      400,
-      {
-        error:
-          "Informe notes"
-      }
-    );
-
-    return;
-
-  }
-
-
-  const notes =
-    rawNotes
-      .split(",")
-      .map(
-        note =>
-          note.trim()
-      );
-
-
-  const result =
-    createChromaTest(
-      notes
-    );
-
-
-  sendJson(
-    res,
-    200,
-    {
-
-      success:true,
-
-      input:
-        notes,
-
-      result
-
-    }
-  );
-
-
-  return;
-
-}
-
-
-/* ================================
-   DETECTAR NOTAS A PARTIR DE CHROMA
-================================ */
-
-if(
-  req.method === "POST"
-  &&
-  req.url === "/chroma-to-notes"
-){
-
-  try{
-
-    const body =
-      await readBody(req);
-
-
-    if(
-      !Array.isArray(
-        body.chroma
-      )
-      ||
-      body.chroma.length !== 12
-    ){
-
-      sendJson(
-        res,
-        400,
-        {
-          error:
-            "chroma precisa ter 12 valores"
-        }
-      );
-
-      return;
-
-    }
-
-
-    const notes =
-      chromaToNotes(
-        body.chroma,
-        {
-
-          threshold:
-            Number.isFinite(
-              Number(
-                body.threshold
-              )
+        const semitones =
+          Number(
+            url.searchParams.get(
+              "semitones"
             )
-            ?
-            Number(
-              body.threshold
-            )
-            :
-            0.58
+          );
+
+
+        if(
+          !chord
+          ||
+          !Number.isFinite(
+            semitones
+          )
+        ){
+
+          sendJson(
+            res,
+            400,
+            {
+
+              error:
+                "Parâmetros inválidos"
+
+            }
+          );
+
+
+          return;
 
         }
-      );
 
 
-    sendJson(
-      res,
-      200,
-      {
+        const result =
+          transposeChord(
+            chord,
+            semitones
+          );
 
-        success:true,
 
-        notes
+        sendJson(
+          res,
+          result
+            ? 200
+            : 400,
+          {
+
+            original:
+              chord,
+
+            semitones,
+
+            result
+
+          }
+        );
+
+
+        return;
 
       }
-    );
-
-  }
-  catch(error){
-
-    sendJson(
-      res,
-      500,
-      {
-        error:
-          error.message
-      }
-    );
-
-  }
 
 
-  return;
+      /* =====================================
+         LISTA DE NOTAS
+      ===================================== */
 
-}
-      /* ================================
-   ANALISAR WAV
-================================ */
+      if(
+        req.method === "GET"
+        &&
+        req.url === "/notes"
+      ){
 
-if(
-  req.method === "POST"
-  &&
-  req.url === "/analyze-wav"
-){
-
-  try{
-
-    const contentType =
-      req.headers[
-        "content-type"
-      ]
-      ||
-      "";
-
-
-    if(
-      !contentType.includes(
-        "audio/wav"
-      )
-      &&
-      !contentType.includes(
-        "audio/x-wav"
-      )
-      &&
-      !contentType.includes(
-        "application/octet-stream"
-      )
-    ){
-
-      sendJson(
-        res,
-        415,
-        {
-          error:
-            "Envie um arquivo WAV"
-        }
-      );
-
-      return;
-
-    }
-
-
-    const buffer =
-      await readBinaryBody(
-        req
-      );
-
-
-    const audio =
-      await analyzeWavBuffer(
-        buffer,
-        {
-          threshold:0.56,
-          maxNotes:6,
-          frameSize:4096,
-          hopSize:2048
-        }
-      );
-
-
-    const timeline =
-      detectChordTimeline(
-        audio.frames.map(
-          frame => ({
-            time:
-              frame.time,
+        sendJson(
+          res,
+          200,
+          {
 
             notes:
-              frame.notes
-          })
+              getNoteNames()
+
+          }
+        );
+
+
+        return;
+
+      }
+
+
+      /* =====================================
+         DETECTAR ACORDE VIA POST
+      ===================================== */
+
+      if(
+        req.method === "POST"
+        &&
+        req.url === "/detect-chord"
+      ){
+
+        try{
+
+          const body =
+            await readBody(
+              req
+            );
+
+
+          const result =
+            detectChord(
+              body.notes
+            );
+
+
+          sendJson(
+            res,
+            result.valid
+              ? 200
+              : 400,
+            result
+          );
+
+        }
+
+        catch(error){
+
+          sendJson(
+            res,
+            500,
+            {
+
+              error:
+                error.message
+
+            }
+          );
+
+        }
+
+
+        return;
+
+      }
+
+
+      /* =====================================
+         DETECTAR ACORDE VIA GET
+      ===================================== */
+
+      if(
+        req.method === "GET"
+        &&
+        req.url.startsWith(
+          "/detect?"
         )
-      );
+      ){
+
+        const url =
+          new URL(
+            req.url,
+            "http://localhost"
+          );
 
 
-    sendJson(
-      res,
-      200,
-      {
+        const raw =
+          url.searchParams.get(
+            "notes"
+          );
 
-        success:true,
 
-        audio:{
+        if(!raw){
 
-          sampleRate:
-            audio.sampleRate,
+          sendJson(
+            res,
+            400,
+            {
 
-          duration:
+              error:
+                "Informe notes"
+
+            }
+          );
+
+
+          return;
+
+        }
+
+
+        const notes =
+          raw
+            .split(",")
+            .map(
+              note =>
+                note.trim()
+            );
+
+
+        const result =
+          detectChord(
+            notes
+          );
+
+
+        sendJson(
+          res,
+          result.valid
+            ? 200
+            : 400,
+          result
+        );
+
+
+        return;
+
+      }
+
+
+      /* =====================================
+         TIMELINE DE ACORDES
+      ===================================== */
+
+      if(
+        req.method === "POST"
+        &&
+        req.url === "/detect-timeline"
+      ){
+
+        try{
+
+          const body =
+            await readBody(
+              req
+            );
+
+
+          const frames =
+            body.frames;
+
+
+          if(
+            !Array.isArray(
+              frames
+            )
+          ){
+
+            sendJson(
+              res,
+              400,
+              {
+
+                error:
+                  "frames precisa ser um array"
+
+              }
+            );
+
+
+            return;
+
+          }
+
+
+          const chords =
+            detectChordTimeline(
+              frames
+            );
+
+
+          sendJson(
+            res,
+            200,
+            {
+
+              success:
+                true,
+
+              frameCount:
+                frames.length,
+
+              chordCount:
+                chords.length,
+
+              chords
+
+            }
+          );
+
+        }
+
+        catch(error){
+
+          sendJson(
+            res,
+            500,
+            {
+
+              error:
+                error.message
+
+            }
+          );
+
+        }
+
+
+        return;
+
+      }
+
+
+      /* =====================================
+         DEMONSTRAÇÃO DA TIMELINE
+      ===================================== */
+
+      if(
+        req.method === "GET"
+        &&
+        req.url === "/timeline-demo"
+      ){
+
+        const frames = [
+
+          {
+            time:0,
+            notes:[
+              "C",
+              "E",
+              "G",
+              "B"
+            ]
+          },
+
+          {
+            time:2,
+            notes:[
+              "C",
+              "E",
+              "G",
+              "B"
+            ]
+          },
+
+          {
+            time:4,
+            notes:[
+              "A",
+              "C",
+              "E",
+              "G"
+            ]
+          },
+
+          {
+            time:6,
+            notes:[
+              "A",
+              "C",
+              "E",
+              "G"
+            ]
+          },
+
+          {
+            time:8,
+            notes:[
+              "F",
+              "A",
+              "C",
+              "E"
+            ]
+          },
+
+          {
+            time:10,
+            notes:[
+              "G",
+              "B",
+              "D",
+              "F"
+            ]
+          }
+
+        ];
+
+
+        const chords =
+          detectChordTimeline(
+            frames
+          );
+
+
+        sendJson(
+          res,
+          200,
+          {
+
+            frames,
+
+            chords
+
+          }
+        );
+
+
+        return;
+
+      }
+
+
+      /* =====================================
+         TESTAR CHROMA
+      ===================================== */
+
+      if(
+        req.method === "GET"
+        &&
+        req.url.startsWith(
+          "/chroma-test?"
+        )
+      ){
+
+        const url =
+          new URL(
+            req.url,
+            "http://localhost"
+          );
+
+
+        const rawNotes =
+          url.searchParams.get(
+            "notes"
+          );
+
+
+        if(!rawNotes){
+
+          sendJson(
+            res,
+            400,
+            {
+
+              error:
+                "Informe notes"
+
+            }
+          );
+
+
+          return;
+
+        }
+
+
+        const notes =
+          rawNotes
+            .split(",")
+            .map(
+              note =>
+                note.trim()
+            );
+
+
+        const result =
+          createChromaTest(
+            notes
+          );
+
+
+        sendJson(
+          res,
+          200,
+          {
+
+            success:
+              true,
+
+            input:
+              notes,
+
+            result
+
+          }
+        );
+
+
+        return;
+
+      }
+
+
+      /* =====================================
+         CHROMA -> NOTAS
+      ===================================== */
+
+      if(
+        req.method === "POST"
+        &&
+        req.url === "/chroma-to-notes"
+      ){
+
+        try{
+
+          const body =
+            await readBody(
+              req
+            );
+
+
+          if(
+            !Array.isArray(
+              body.chroma
+            )
+            ||
+            body.chroma.length !== 12
+          ){
+
+            sendJson(
+              res,
+              400,
+              {
+
+                error:
+                  "chroma precisa ter 12 valores"
+
+              }
+            );
+
+
+            return;
+
+          }
+
+
+          let threshold =
             Number(
-              audio.duration
-                .toFixed(3)
-            ),
+              body.threshold
+            );
 
-          frameCount:
-            audio.frameCount
 
-        },
+          if(
+            !Number.isFinite(
+              threshold
+            )
+          ){
 
-        chordCount:
-          timeline.length,
+            threshold =
+              0.58;
 
-        chords:
-          timeline
+          }
+
+
+          const notes =
+            chromaToNotes(
+              body.chroma,
+              {
+                threshold
+              }
+            );
+
+
+          sendJson(
+            res,
+            200,
+            {
+
+              success:
+                true,
+
+              notes
+
+            }
+          );
+
+        }
+
+        catch(error){
+
+          sendJson(
+            res,
+            500,
+            {
+
+              error:
+                error.message
+
+            }
+          );
+
+        }
+
+
+        return;
 
       }
-    );
-
-  }
-  catch(error){
-
-    console.error(
-      error
-    );
 
 
-    sendJson(
-      res,
-      500,
-      {
-        error:
-          "Falha ao analisar WAV",
+      /* =====================================
+         ANALISAR WAV REAL
+      ===================================== */
 
-        message:
-          error.message
+      if(
+        req.method === "POST"
+        &&
+        req.url === "/analyze-wav"
+      ){
+
+        try{
+
+          const contentType =
+            req.headers[
+              "content-type"
+            ]
+            ||
+            "";
+
+
+          if(
+            !contentType.includes(
+              "audio/wav"
+            )
+            &&
+            !contentType.includes(
+              "audio/x-wav"
+            )
+            &&
+            !contentType.includes(
+              "application/octet-stream"
+            )
+          ){
+
+            sendJson(
+              res,
+              415,
+              {
+
+                error:
+                  "Envie um arquivo WAV",
+
+                receivedContentType:
+                  contentType
+
+              }
+            );
+
+
+            return;
+
+          }
+
+
+          /*
+            AGORA readBinaryBody existe
+            no escopo correto.
+          */
+
+          const buffer =
+            await readBinaryBody(
+              req
+            );
+
+
+          if(
+            !buffer
+            ||
+            buffer.length === 0
+          ){
+
+            sendJson(
+              res,
+              400,
+              {
+
+                error:
+                  "Arquivo WAV vazio"
+
+              }
+            );
+
+
+            return;
+
+          }
+
+
+          console.log(
+            `WAV recebido: ${buffer.length} bytes`
+          );
+
+
+          const audio =
+            await analyzeWavBuffer(
+              buffer,
+              {
+
+                threshold:
+                  0.56,
+
+                maxNotes:
+                  6,
+
+                frameSize:
+                  4096,
+
+                hopSize:
+                  2048
+
+              }
+            );
+
+
+          /*
+            Transformamos os frames
+            encontrados pelo Audio Engine
+            em uma timeline de acordes.
+          */
+
+          const timeline =
+            detectChordTimeline(
+
+              audio.frames.map(
+                frame => ({
+
+                  time:
+                    frame.time,
+
+                  notes:
+                    frame.notes
+
+                })
+              )
+
+            );
+
+
+          sendJson(
+            res,
+            200,
+            {
+
+              success:
+                true,
+
+              engine:
+                "Chord AI Audio Engine",
+
+              audio:{
+
+                sampleRate:
+                  audio.sampleRate,
+
+                duration:
+                  Number(
+                    audio.duration
+                      .toFixed(3)
+                  ),
+
+                frameCount:
+                  audio.frameCount
+
+              },
+
+              chordCount:
+                timeline.length,
+
+              chords:
+                timeline
+
+            }
+          );
+
+        }
+
+        catch(error){
+
+          console.error(
+            "ERRO /analyze-wav:",
+            error
+          );
+
+
+          sendJson(
+            res,
+            500,
+            {
+
+              error:
+                "Falha ao analisar WAV",
+
+              message:
+                error.message,
+
+              name:
+                error.name
+
+            }
+          );
+
+        }
+
+
+        return;
+
       }
-    );
-
-  }
 
 
-  return;
+      /* =====================================
+         404
 
-}
-      /* 404 */
+         DEVE CONTINUAR SENDO A ÚLTIMA ROTA
+      ===================================== */
 
       sendJson(
         res,
@@ -1285,7 +1543,13 @@ if(
         {
 
           error:
-            "Rota não encontrada"
+            "Rota não encontrada",
+
+          method:
+            req.method,
+
+          path:
+            req.url
 
         }
       );
@@ -1294,18 +1558,36 @@ if(
   );
 
 
-/* ================================
-   INICIAR
-================================ */
+/* =========================================
+   INICIAR SERVIDOR
+========================================= */
 
 server.listen(
   PORT,
   () => {
 
     console.log(
-      "Chord AI API online na porta "
-      +
-      PORT
+      "================================="
+    );
+
+    console.log(
+      "Chord AI API online"
+    );
+
+    console.log(
+      `Porta: ${PORT}`
+    );
+
+    console.log(
+      "Audio Engine: disponível"
+    );
+
+    console.log(
+      "POST /analyze-wav: disponível"
+    );
+
+    console.log(
+      "================================="
     );
 
   }
