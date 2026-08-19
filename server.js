@@ -116,6 +116,7 @@ function readBody(req){
           if(finished)
             return;
 
+
           body += chunk;
 
 
@@ -146,6 +147,7 @@ function readBody(req){
 
           if(finished)
             return;
+
 
           finished = true;
 
@@ -181,6 +183,7 @@ function readBody(req){
 
           if(finished)
             return;
+
 
           finished = true;
 
@@ -258,6 +261,7 @@ function readBinaryBody(req){
           if(finished)
             return;
 
+
           finished = true;
 
 
@@ -277,6 +281,7 @@ function readBinaryBody(req){
 
           if(finished)
             return;
+
 
           finished = true;
 
@@ -431,9 +436,15 @@ const server =
               "online",
 
             version:
-              "1.2.0",
+              "1.3.0",
 
             audioEngine:
+              "v3",
+
+            chordEngine:
+              "v5",
+
+            bassDetector:
               true,
 
             chromaDetection:
@@ -473,10 +484,13 @@ const server =
               "chord-ai-api",
 
             audioEngine:
+              "v3",
+
+            bassDetector:
               "online",
 
             chordEngine:
-              "v3"
+              "v5"
 
           }
         );
@@ -519,10 +533,8 @@ const server =
               res,
               400,
               {
-
                 error:
                   "videoId inválido"
-
               }
             );
 
@@ -638,10 +650,8 @@ const server =
               res,
               400,
               {
-
                 error:
                   "Informe um acorde"
-
               }
             );
 
@@ -672,10 +682,8 @@ const server =
             res,
             500,
             {
-
               error:
                 error.message
-
             }
           );
 
@@ -732,10 +740,8 @@ const server =
             res,
             400,
             {
-
               error:
                 "Parâmetros inválidos"
-
             }
           );
 
@@ -788,10 +794,8 @@ const server =
           res,
           200,
           {
-
             notes:
               getNoteNames()
-
           }
         );
 
@@ -841,10 +845,8 @@ const server =
             res,
             500,
             {
-
               error:
                 error.message
-
             }
           );
 
@@ -887,10 +889,8 @@ const server =
             res,
             400,
             {
-
               error:
                 "Informe notes"
-
             }
           );
 
@@ -960,10 +960,8 @@ const server =
               res,
               400,
               {
-
                 error:
                   "frames precisa ser um array"
-
               }
             );
 
@@ -984,10 +982,7 @@ const server =
               {
 
                 minDuration:
-                  0.55,
-
-                confidenceThreshold:
-                  0.38
+                  0.45
 
               }
             );
@@ -1027,10 +1022,8 @@ const server =
             res,
             500,
             {
-
               error:
                 error.message
-
             }
           );
 
@@ -1057,60 +1050,42 @@ const server =
           {
             time:0,
             notes:[
-              "C",
-              "E",
-              "G",
-              "B"
+              "C","E","G","B"
             ]
           },
 
           {
             time:2,
             notes:[
-              "C",
-              "E",
-              "G",
-              "B"
+              "C","E","G","B"
             ]
           },
 
           {
             time:4,
             notes:[
-              "A",
-              "C",
-              "E",
-              "G"
+              "A","C","E","G"
             ]
           },
 
           {
             time:6,
             notes:[
-              "A",
-              "C",
-              "E",
-              "G"
+              "A","C","E","G"
             ]
           },
 
           {
             time:8,
             notes:[
-              "F",
-              "A",
-              "C",
-              "E"
+              "F","A","C","E"
             ]
           },
 
           {
             time:10,
             notes:[
-              "G",
-              "B",
-              "D",
-              "F"
+              "G","B","D","F"
             ]
           }
 
@@ -1180,10 +1155,8 @@ const server =
             res,
             400,
             {
-
               error:
                 "Informe notes"
-
             }
           );
 
@@ -1259,10 +1232,8 @@ const server =
               res,
               400,
               {
-
                 error:
                   "chroma precisa ter 12 valores"
-
               }
             );
 
@@ -1319,10 +1290,8 @@ const server =
             res,
             500,
             {
-
               error:
                 error.message
-
             }
           );
 
@@ -1335,7 +1304,8 @@ const server =
 
 
       /* =====================================
-         ANALISAR WAV REAL — CHROMA V3
+         ANALISAR WAV REAL
+         CHROMA + BASS DATA
       ===================================== */
 
       if(
@@ -1403,10 +1373,8 @@ const server =
               res,
               400,
               {
-
                 error:
                   "Arquivo WAV vazio"
-
               }
             );
 
@@ -1448,29 +1416,57 @@ const server =
 
 
           /*
-            NOVO:
+            AGORA ENVIAMOS:
 
-            Agora não enviamos apenas
-            "frame.notes".
+            chroma
+            bassChroma
+            bassNote
 
-            Enviamos o chroma completo.
+            O Chord Engine v6 poderá
+            usar isso diretamente.
           */
+
+          const analysisFrames =
+            audio.frames.map(
+              frame => ({
+
+                time:
+                  frame.time,
+
+                chroma:
+                  frame.chroma,
+
+                bassChroma:
+                  frame.bassChroma,
+
+                bassNote:
+                  frame.bassNote
+
+              })
+            );
+
 
           const rawTimeline =
             detectChordTimelineFromChroma(
+              analysisFrames,
+              {
 
-              audio.frames.map(
-                frame => ({
+                candidateLimit:
+                  6,
 
-                  time:
-                    frame.time,
+                changePenalty:
+                  0.18,
 
-                  chroma:
-                    frame.chroma
+                stayBonus:
+                  0.055,
 
-                })
-              )
+                emissionWeight:
+                  1.45,
 
+                bassWeight:
+                  0.34
+
+              }
             );
 
 
@@ -1480,13 +1476,41 @@ const server =
               {
 
                 minDuration:
-                  0.55,
-
-                confidenceThreshold:
-                  0.38
+                  0.45
 
               }
             );
+
+
+          /*
+            Diagnóstico do baixo.
+
+            Útil enquanto estamos
+            desenvolvendo o v6.
+          */
+
+          const bassPreview =
+            analysisFrames
+              .slice(
+                0,
+                30
+              )
+              .map(
+                frame => ({
+
+                  time:
+                    Number(
+                      frame.time
+                        .toFixed(2)
+                    ),
+
+                  bassNote:
+                    frame.bassNote
+                    ||
+                    null
+
+                })
+              );
 
 
           sendJson(
@@ -1500,10 +1524,13 @@ const server =
               engine:
                 "Chord AI Audio Engine",
 
-              chordEngine:
-                "v3-chroma",
+              audioEngine:
+                "v3-bass",
 
-              stabilization:
+              chordEngine:
+                "v5",
+
+              bassDetector:
                 true,
 
               audio:{
@@ -1534,7 +1561,13 @@ const server =
                 timeline.length,
 
               chords:
-                timeline
+                timeline,
+
+              debug:{
+
+                bassPreview
+
+              }
 
             }
           );
@@ -1620,15 +1653,15 @@ server.listen(
     );
 
     console.log(
-      "Audio Engine: disponível"
+      "Audio Engine v3: disponível"
     );
 
     console.log(
-      "Chord Engine v3: CHROMA"
+      "Bass Detector: disponível"
     );
 
     console.log(
-      "Timeline Stabilizer: disponível"
+      "Chord Engine: v5"
     );
 
     console.log(
