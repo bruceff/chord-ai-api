@@ -6,7 +6,7 @@ import {
 
 /* =========================================
    CHORD AI
-   RECONSTRUCTION VALIDATOR v2
+   RECONSTRUCTION VALIDATOR v2.1 — DIAGNOSTIC
 
    Objetivos:
 
@@ -23,7 +23,12 @@ import {
       simplesmente apagar acordes curtos;
 
    5. nunca usar regras específicas para
-      um acorde ou benchmark.
+      um acorde ou benchmark;
+
+   6. v2.1:
+      expor diagnóstico completo dos
+      candidatos SEM alterar a decisão
+      musical do v2.
 ========================================= */
 
 
@@ -165,7 +170,10 @@ function normalize12(
 
           return Number.isFinite(n)
             ?
-            Math.max(0,n)
+            Math.max(
+              0,
+              n
+            )
             :
             0;
 
@@ -228,7 +236,9 @@ function median(
     sorted.length % 2
   ){
 
-    return sorted[middle];
+    return sorted[
+      middle
+    ];
 
   }
 
@@ -237,7 +247,9 @@ function median(
     sorted[middle - 1]
     +
     sorted[middle]
-  ) / 2;
+  )
+  /
+  2;
 
 }
 
@@ -341,10 +353,8 @@ function dominantBass(
 
 
     /*
-      v2:
-
-      usa confiança real do Bass Detector
-      quando ela estiver disponível.
+      Usa confiança real do Bass Detector
+      quando disponível.
     */
 
     const confidence =
@@ -514,7 +524,9 @@ function pitchSetFromChord(
     analyzed.notes
       .map(
         note =>
-          noteIndex(note)
+          noteIndex(
+            note
+          )
       )
       .filter(
         index =>
@@ -538,13 +550,7 @@ function pitchSetFromChord(
 
 
 /* =========================================
-   PERSISTÊNCIA DE UMA NOTA
-
-   v2:
-   não usa apenas "passou de 0.28".
-
-   Também mede a força relativa da nota
-   dentro do próprio frame.
+   PERSISTÊNCIA / EVIDÊNCIA DE PITCH
 ========================================= */
 
 function pitchEvidence(
@@ -555,6 +561,7 @@ function pitchEvidence(
   const energies = [];
 
   const relativeEnergies = [];
+
 
   let presentStrong = 0;
 
@@ -642,7 +649,9 @@ function pitchEvidence(
     medianEnergy:
       energies.length
       ?
-      median(energies)
+      median(
+        energies
+      )
       :
       0,
 
@@ -669,9 +678,6 @@ function pitchEvidence(
 
 /* =========================================
    SCORE DE RECONSTRUÇÃO
-
-   Mede quanto uma hipótese explica
-   a região observada.
 ========================================= */
 
 function reconstructionMetrics(
@@ -711,7 +717,9 @@ function reconstructionMetrics(
   ){
 
     if(
-      set.has(pitch)
+      set.has(
+        pitch
+      )
     ){
 
       inside +=
@@ -791,11 +799,6 @@ function reconstructionMetrics(
     0;
 
 
-  /*
-    Notas obrigatórias com pouca evidência
-    geram penalidade.
-  */
-
   let missingPenalty = 0;
 
 
@@ -805,7 +808,8 @@ function reconstructionMetrics(
   ){
 
     if(
-      item.relativeEnergy < 0.28
+      item.relativeEnergy <
+      0.28
     ){
 
       missingPenalty +=
@@ -829,13 +833,9 @@ function reconstructionMetrics(
     );
 
 
-  /*
-    Compatibilidade do baixo.
-
-    Fundamental = máxima.
-    Inversão legítima = quase máxima.
-    Nota externa = forte penalidade.
-  */
+  /* =====================================
+     COMPATIBILIDADE DO BAIXO
+  ===================================== */
 
   let bassCompatibility =
     0.50;
@@ -895,7 +895,9 @@ function reconstructionMetrics(
   const rootEnergy =
     root >= 0
     ?
-    regionChroma[root]
+    regionChroma[
+      root
+    ]
     :
     0;
 
@@ -978,9 +980,6 @@ function reconstructionMetrics(
 
 /* =========================================
    COMPLEXIDADE HARMÔNICA
-
-   Quanto mais informação o símbolo exige,
-   maior precisa ser o ganho acústico.
 ========================================= */
 
 function qualityComplexity(
@@ -1048,21 +1047,6 @@ function qualityComplexity(
 
 /* =========================================
    ACORDE PAI MAIS SIMPLES
-
-   Serve para medir o ganho marginal de
-   uma extensão.
-
-   Exemplos:
-
-   Cmaj7 -> C
-   C7    -> C
-   Cm7   -> Cm
-   C6    -> C
-   Cm6   -> Cm
-   C9    -> C7
-
-   Não existem regras específicas para
-   notas ou tonalidades.
 ========================================= */
 
 function simplerParent(
@@ -1113,7 +1097,11 @@ function simplerParent(
     quality === "MINADD9"
   ){
 
-    return root + "m";
+    return (
+      root
+      +
+      "m"
+    );
 
   }
 
@@ -1130,7 +1118,11 @@ function simplerParent(
     quality === "7#5"
   ){
 
-    return root + "7";
+    return (
+      root
+      +
+      "7"
+    );
 
   }
 
@@ -1141,7 +1133,11 @@ function simplerParent(
     quality === "MAJ7#11"
   ){
 
-    return root + "maj7";
+    return (
+      root
+      +
+      "maj7"
+    );
 
   }
 
@@ -1150,17 +1146,14 @@ function simplerParent(
     quality === "MIN9"
   ){
 
-    return root + "m7";
+    return (
+      root
+      +
+      "m7"
+    );
 
   }
 
-
-  /*
-    m7b5 não é tratado como simplesmente
-    "m7 com extensão".
-
-    A quinta diminuta é estrutural.
-  */
 
   return null;
 
@@ -1168,13 +1161,7 @@ function simplerParent(
 
 
 /* =========================================
-   GANHO MARGINAL
-
-   Pergunta:
-
-   "A versão mais complexa realmente
-   explica algo que o modelo simples
-   não explicava?"
+   GANHO MARGINAL DE EXTENSÃO
 ========================================= */
 
 function marginalExtensionEvidence(
@@ -1252,13 +1239,6 @@ function marginalExtensionEvidence(
     parentMetrics.score;
 
 
-  /*
-    Minimum Description Length simples:
-
-    uma hipótese mais complexa precisa
-    comprar seu custo com explicação real.
-  */
-
   const complexity =
     qualityComplexity(
       candidate.quality
@@ -1269,7 +1249,8 @@ function marginalExtensionEvidence(
 
 
   if(
-    marginalGain < 0.025
+    marginalGain <
+    0.025
   ){
 
     complexityPenalty =
@@ -1280,7 +1261,8 @@ function marginalExtensionEvidence(
   }
 
   else if(
-    marginalGain < 0.045
+    marginalGain <
+    0.045
   ){
 
     complexityPenalty =
@@ -1308,16 +1290,14 @@ function marginalExtensionEvidence(
 
 
 /* =========================================
-   CANDIDATOS AMPLIADOS
+   CANDIDATOS AMPLIADOS — DECISÃO v2
 
-   v1 analisava só poucos candidatos.
+   IMPORTANTE:
 
-   v2 pede todos os templates disponíveis
-   e depois cria um shortlist.
+   ESTA FUNÇÃO FOI MANTIDA IGUAL AO v2.
 
-   Isso permite recuperar candidatos cujo
-   root coincide com um baixo extremamente
-   consistente.
+   Portanto o diagnóstico v2.1 não muda
+   nenhuma decisão musical.
 ========================================= */
 
 function getExpandedCandidates(
@@ -1332,12 +1312,8 @@ function getExpandedCandidates(
       {
 
         /*
-          O engine atual tem muito menos
-          que 256 templates no total.
-
-          Portanto isto nos permite
-          observar candidatos que ficaram
-          fora do top-8.
+          Mantido em 256 propositalmente
+          para preservar a decisão do v2.
         */
 
         limit:
@@ -1358,6 +1334,7 @@ function getExpandedCandidates(
   ){
 
     return [];
+
   }
 
 
@@ -1369,10 +1346,10 @@ function getExpandedCandidates(
     new Map();
 
 
-  /*
-    Grupo 1:
-    candidatos harmonicamente próximos.
-  */
+  /* =====================================
+     GRUPO 1
+     candidatos próximos
+  ===================================== */
 
   for(
     const candidate
@@ -1397,10 +1374,10 @@ function getExpandedCandidates(
   }
 
 
-  /*
-    Grupo 2:
-    candidato original nunca desaparece.
-  */
+  /* =====================================
+     GRUPO 2
+     original
+  ===================================== */
 
   const original =
     all.find(
@@ -1420,21 +1397,16 @@ function getExpandedCandidates(
   }
 
 
-  /*
-    Grupo 3 — Candidate Rescue:
-
-    Se o baixo é extremamente consistente,
-    permitimos que candidatos cuja root é
-    esse baixo entrem na disputa mesmo
-    estando mais abaixo no ranking.
-
-    Ainda haverá limite de distância.
-  */
+  /* =====================================
+     GRUPO 3
+     candidate rescue v2
+  ===================================== */
 
   if(
     bass.note
     &&
-    bass.ratio >= 0.82
+    bass.ratio >=
+    0.82
   ){
 
     for(
@@ -1544,22 +1516,14 @@ function scoreCandidate(
     );
 
 
-  /*
-    Penalidade extremamente importante:
-
-    se o baixo regional é estável e nem
-    sequer pertence ao acorde candidato,
-    a hipótese precisa de evidência
-    excepcional para sobreviver.
-  */
-
   let incompatibleBassPenalty = 0;
 
 
   if(
     bass.note
     &&
-    bass.ratio >= 0.80
+    bass.ratio >=
+    0.80
   ){
 
     const analyzed =
@@ -1617,6 +1581,480 @@ function scoreCandidate(
     incompatibleBassPenalty,
 
     finalScore
+
+  };
+
+}
+
+
+/* =========================================
+   DIAGNÓSTICO COMPLETO DE CANDIDATOS — v2.1
+
+   ESTA CAMADA NÃO PARTICIPA DA DECISÃO.
+
+   Ela observa os 288 templates possíveis:
+
+   12 roots
+   ×
+   24 qualidades
+   =
+   288 candidatos.
+
+   A decisão continua utilizando o
+   getExpandedCandidates() acima.
+========================================= */
+
+function buildCandidateDiagnostics(
+  regionChroma,
+  regionFrames,
+  bass,
+  originalBase,
+  decisionCandidates,
+  options
+){
+
+  const all =
+    detectChordCandidatesFromChroma(
+      regionChroma,
+      {
+
+        limit:
+          288,
+
+        bassNote:
+          bass.note,
+
+        bassChroma:
+          null
+
+      }
+    );
+
+
+  if(
+    !Array.isArray(all)
+    ||
+    all.length === 0
+  ){
+
+    return {
+
+      candidateSearch:{
+
+        totalObserved:
+          0,
+
+        expectedTemplateCount:
+          288,
+
+        originalBase,
+
+        originalDetectorRank:
+          null,
+
+        originalInTop256:
+          false,
+
+        originalInDecisionShortlist:
+          false,
+
+        bassRoot:
+          bass.note
+          ||
+          null,
+
+        bassRatio:
+          Number(
+            (
+              bass.ratio
+              ||
+              0
+            )
+            .toFixed(3)
+          )
+
+      },
+
+      topCandidates:[],
+
+      bassRootCandidates:[]
+
+    };
+
+  }
+
+
+  const bestDetectorScore =
+    all[0].score;
+
+
+  const decisionSet =
+    new Set(
+      (
+        decisionCandidates
+        ||
+        []
+      )
+      .map(
+        candidate =>
+          candidate.chord
+      )
+    );
+
+
+  const diagnosticScored =
+    all
+      .map(
+        (candidate,index) => {
+
+          const scored =
+            scoreCandidate(
+              candidate,
+              regionFrames,
+              regionChroma,
+              bass,
+              bestDetectorScore,
+              options
+            );
+
+
+          if(!scored)
+            return null;
+
+
+          const detectorRank =
+            index + 1;
+
+
+          const detectorGap =
+            bestDetectorScore
+            -
+            candidate.score;
+
+
+          let shortlistStatus =
+            "excluded";
+
+
+          if(
+            decisionSet.has(
+              candidate.chord
+            )
+          ){
+
+            shortlistStatus =
+              "included";
+
+          }
+
+          else if(
+            detectorRank >
+            256
+          ){
+
+            shortlistStatus =
+              "outside-top-256";
+
+          }
+
+          else if(
+            bass.note
+            &&
+            candidate.root ===
+            bass.note
+            &&
+            bass.ratio >=
+            0.82
+            &&
+            detectorGap >
+            0.32
+          ){
+
+            shortlistStatus =
+              "bass-root-gap-over-0.32";
+
+          }
+
+          else if(
+            detectorGap >
+            0.20
+          ){
+
+            shortlistStatus =
+              "detector-gap-over-0.20";
+
+          }
+
+
+          return {
+
+            detectorRank,
+
+            chord:
+              candidate.chord,
+
+            root:
+              candidate.root,
+
+            quality:
+              candidate.quality,
+
+            notes:
+              candidate.notes,
+
+            detectorScore:
+              Number(
+                candidate.score
+                  .toFixed(6)
+              ),
+
+            detectorGap:
+              Number(
+                detectorGap
+                  .toFixed(6)
+              ),
+
+            detectorNorm:
+              Number(
+                scored.detectorNorm
+                  .toFixed(6)
+              ),
+
+            reconstructionScore:
+              Number(
+                scored.metrics.score
+                  .toFixed(6)
+              ),
+
+            coverage:
+              Number(
+                scored.metrics.coverage
+                  .toFixed(6)
+              ),
+
+            unexplained:
+              Number(
+                scored.metrics.unexplained
+                  .toFixed(6)
+              ),
+
+            averagePresence:
+              Number(
+                scored.metrics.averagePresence
+                  .toFixed(6)
+              ),
+
+            persistence:
+              Number(
+                scored.metrics.persistence
+                  .toFixed(6)
+              ),
+
+            missingPenalty:
+              Number(
+                scored.metrics.missingPenalty
+                  .toFixed(6)
+              ),
+
+            bassCompatibility:
+              Number(
+                scored.metrics.bassCompatibility
+                  .toFixed(6)
+              ),
+
+            rootEnergy:
+              Number(
+                scored.metrics.rootEnergy
+                  .toFixed(6)
+              ),
+
+            marginalGain:
+              scored.marginal
+                .marginalGain
+                ==
+                null
+              ?
+              null
+              :
+              Number(
+                scored.marginal
+                  .marginalGain
+                  .toFixed(6)
+              ),
+
+            marginalParent:
+              scored.marginal
+                .parentChord,
+
+            complexityPenalty:
+              Number(
+                scored.marginal
+                  .complexityPenalty
+                  .toFixed(6)
+              ),
+
+            incompatibleBassPenalty:
+              Number(
+                scored
+                  .incompatibleBassPenalty
+                  .toFixed(6)
+              ),
+
+            finalScore:
+              Number(
+                scored.finalScore
+                  .toFixed(6)
+              ),
+
+            inDecisionShortlist:
+              decisionSet.has(
+                candidate.chord
+              ),
+
+            shortlistStatus
+
+          };
+
+        }
+      )
+      .filter(Boolean);
+
+
+  /* =====================================
+     TOP POR FINAL SCORE
+  ===================================== */
+
+  const byFinalScore =
+    [...diagnosticScored]
+      .sort(
+        (a,b) =>
+          b.finalScore
+          -
+          a.finalScore
+      );
+
+
+  /* =====================================
+     TODOS OS MELHORES COM ROOT = BASS
+
+     Esse bloco é essencial para descobrir
+     casos como um candidato correto que
+     nunca entrou no Candidate Rescue.
+  ===================================== */
+
+  const bassRootCandidates =
+    bass.note
+    ?
+    diagnosticScored
+      .filter(
+        candidate =>
+          candidate.root ===
+          bass.note
+      )
+      .sort(
+        (a,b) =>
+          b.finalScore
+          -
+          a.finalScore
+      )
+      .slice(
+        0,
+        12
+      )
+    :
+    [];
+
+
+  const original =
+    diagnosticScored.find(
+      candidate =>
+        candidate.chord ===
+        originalBase
+    );
+
+
+  return {
+
+    candidateSearch:{
+
+      totalObserved:
+        all.length,
+
+      expectedTemplateCount:
+        288,
+
+      originalBase,
+
+      originalDetectorRank:
+        original
+        ?
+        original.detectorRank
+        :
+        null,
+
+      originalInTop256:
+        original
+        ?
+        original.detectorRank <=
+        256
+        :
+        false,
+
+      originalInDecisionShortlist:
+        original
+        ?
+        original
+          .inDecisionShortlist
+        :
+        false,
+
+      bassRoot:
+        bass.note
+        ||
+        null,
+
+      bassRatio:
+        Number(
+          (
+            bass.ratio
+            ||
+            0
+          )
+          .toFixed(3)
+        ),
+
+      decisionShortlistCount:
+        decisionSet.size
+
+    },
+
+
+    /*
+      Top 12 candidatos pelo score FINAL
+      calculado com a fórmula atual.
+
+      Isso NÃO altera quem vence.
+    */
+
+    topCandidates:
+      byFinalScore.slice(
+        0,
+        12
+      ),
+
+
+    /*
+      Top candidatos cuja ROOT coincide
+      com o baixo regional.
+
+      Exemplo:
+      bass = B
+
+      aqui veremos B, Bm, B7, Bm7b5,
+      Bdim, etc.
+    */
+
+    bassRootCandidates
 
   };
 
@@ -1695,16 +2133,27 @@ function validateRegion(
   const regionFrames =
     frames.filter(
       frame =>
-        Number(frame.time) >=
-        Number(segment.start)
+        Number(
+          frame.time
+        )
+        >=
+        Number(
+          segment.start
+        )
         &&
-        Number(frame.time) <
-        Number(segment.end)
+        Number(
+          frame.time
+        )
+        <
+        Number(
+          segment.end
+        )
     );
 
 
   if(
-    regionFrames.length === 0
+    regionFrames.length ===
+    0
   ){
 
     return {
@@ -1757,6 +2206,13 @@ function validateRegion(
     );
 
 
+  /*
+    IMPORTANTE:
+
+    essa continua sendo a mesma função
+    decisória do v2.
+  */
+
   const candidates =
     getExpandedCandidates(
       regionChroma,
@@ -1766,7 +2222,8 @@ function validateRegion(
 
 
   if(
-    candidates.length === 0
+    candidates.length ===
+    0
   ){
 
     return {
@@ -1782,6 +2239,24 @@ function validateRegion(
     };
 
   }
+
+
+  /* =====================================
+     v2.1 DIAGNÓSTICO
+
+     Observa 288 candidatos sem alterar
+     os candidatos de decisão.
+  ===================================== */
+
+  const diagnostics =
+    buildCandidateDiagnostics(
+      regionChroma,
+      regionFrames,
+      bass,
+      originalBase,
+      candidates,
+      options
+    );
 
 
   const bestDetectorScore =
@@ -1816,7 +2291,8 @@ function validateRegion(
 
 
   if(
-    scored.length === 0
+    scored.length ===
+    0
   ){
 
     return {
@@ -1827,7 +2303,10 @@ function validateRegion(
         false,
 
       reconstructionReason:
-        "no-scored-candidates"
+        "no-scored-candidates",
+
+      reconstructionDiagnostics:
+        diagnostics
 
     };
 
@@ -1846,12 +2325,6 @@ function validateRegion(
     scored[0];
 
 
-  /*
-    Se o original não apareceu entre os
-    candidatos expandidos, não fazemos uma
-    troca cega.
-  */
-
   if(!original){
 
     return {
@@ -1862,7 +2335,10 @@ function validateRegion(
         false,
 
       reconstructionReason:
-        "original-not-found"
+        "original-not-found",
+
+      reconstructionDiagnostics:
+        diagnostics
 
     };
 
@@ -1881,17 +2357,11 @@ function validateRegion(
     original.metrics.score;
 
 
-  /*
-    Candidate Rescue recebe uma pequena
-    exceção lógica:
+  /* =====================================
+     CANDIDATE RESCUE v2
 
-    se o acorde original é incompatível
-    com um baixo extremamente consistente
-    e o vencedor contém esse baixo, não
-    exigimos o mesmo reconstructionGain.
-
-    Ainda exigimos vantagem final.
-  */
+     MANTIDO INALTERADO.
+  ===================================== */
 
   const originalAnalyzed =
     analyzeChord(
@@ -1908,7 +2378,8 @@ function validateRegion(
   const originalRejectsBass =
     bass.note
     &&
-    bass.ratio >= 0.88
+    bass.ratio >=
+    0.88
     &&
     originalAnalyzed.valid
     &&
@@ -2091,6 +2562,17 @@ function validateRegion(
       :
       "confirmed",
 
+
+    /* =====================================
+       NOVO v2.1
+
+       diagnóstico completo.
+    ===================================== */
+
+    reconstructionDiagnostics:
+      diagnostics,
+
+
     reconstruction:{
 
       score:
@@ -2150,7 +2632,9 @@ function validateRegion(
 
         gain:
           chosen.marginal
-            .marginalGain == null
+            .marginalGain
+            ==
+            null
           ?
           null
           :
@@ -2190,9 +2674,8 @@ function validateRegion(
 
 
 /* =========================================
-   SCORE DE UM ACORDE EM UM FRAME/REGIÃO
-
-   usado pelo Boundary Validator.
+   RECONSTRUÇÃO DE UM ACORDE
+   PARA BOUNDARY VALIDATOR
 ========================================= */
 
 function reconstructionForBase(
@@ -2203,7 +2686,8 @@ function reconstructionForBase(
   if(
     !baseChord
     ||
-    regionFrames.length === 0
+    regionFrames.length ===
+    0
   ){
 
     return null;
@@ -2260,7 +2744,8 @@ function reconstructionForBase(
       analyzed.root
     ){
 
-      bassFit = 1;
+      bassFit =
+        1;
 
     }
 
@@ -2270,7 +2755,8 @@ function reconstructionForBase(
       )
     ){
 
-      bassFit = 0.9;
+      bassFit =
+        0.9;
 
     }
 
@@ -2287,7 +2773,9 @@ function reconstructionForBase(
     total:
       metrics.score
       +
-      bassFit * 0.08
+      bassFit
+      *
+      0.08
 
   };
 
@@ -2296,14 +2784,6 @@ function reconstructionForBase(
 
 /* =========================================
    BOUNDARY VALIDATOR
-
-   Não diz:
-   "acorde curto é falso".
-
-   Pergunta:
-   "esse segmento possui evidência própria,
-   ou um dos vizinhos explica melhor seus
-   frames?"
 ========================================= */
 
 function resolveBoundarySegments(
@@ -2313,7 +2793,8 @@ function resolveBoundarySegments(
 ){
 
   if(
-    timeline.length < 3
+    timeline.length <
+    3
   ){
 
     return timeline;
@@ -2331,7 +2812,8 @@ function resolveBoundarySegments(
 
   for(
     let index = 1;
-    index < output.length - 1;
+    index <
+    output.length - 1;
     index++
   ){
 
@@ -2340,21 +2822,31 @@ function resolveBoundarySegments(
 
 
     const previous =
-      output[index - 1];
+      output[
+        index - 1
+      ];
 
 
     const next =
-      output[index + 1];
+      output[
+        index + 1
+      ];
 
 
     const duration =
-      Number(current.end)
+      Number(
+        current.end
+      )
       -
-      Number(current.start);
+      Number(
+        current.start
+      );
 
 
     if(
-      !Number.isFinite(duration)
+      !Number.isFinite(
+        duration
+      )
       ||
       duration >
       options.boundaryMaxDuration
@@ -2368,21 +2860,27 @@ function resolveBoundarySegments(
     const members =
       frames.filter(
         frame =>
-          Number(frame.time) >=
-          Number(current.start)
+          Number(
+            frame.time
+          )
+          >=
+          Number(
+            current.start
+          )
           &&
-          Number(frame.time) <
-          Number(current.end)
+          Number(
+            frame.time
+          )
+          <
+          Number(
+            current.end
+          )
       );
 
 
-    /*
-      Boundary mode só existe para regiões
-      com pouquíssima evidência temporal.
-    */
-
     if(
-      members.length === 0
+      members.length ===
+      0
       ||
       members.length >
       options.boundaryMaxFrames
@@ -2445,27 +2943,23 @@ function resolveBoundarySegments(
     }
 
 
-    /*
-      Também observa a continuidade
-      do baixo.
-
-      Se o microsegmento compartilha o baixo
-      com um vizinho, isso é evidência de
-      que pode pertencer àquele lado.
-    */
-
     const microBass =
       dominantBass(
         members
       );
 
 
-    let previousContinuity = 0;
+    let previousContinuity =
+      0;
 
-    let nextContinuity = 0;
+
+    let nextContinuity =
+      0;
 
 
-    if(microBass.note){
+    if(
+      microBass.note
+    ){
 
       const previousBass =
         normalizeNote(
@@ -2522,14 +3016,9 @@ function resolveBoundarySegments(
       );
 
 
-    /*
-      Se o próprio microsegmento explica
-      claramente melhor seus frames,
-      ele sobrevive.
-
-      Assim acordes rápidos verdadeiros
-      não são apagados só pela duração.
-    */
+    /* =====================================
+       ACORDE CURTO COM EVIDÊNCIA PRÓPRIA
+    ===================================== */
 
     if(
       currentScore.total >=
@@ -2541,15 +3030,47 @@ function resolveBoundarySegments(
       current.reconstructionBoundary =
         "kept";
 
+
+      current.boundaryDiagnostic = {
+
+        action:
+          "kept",
+
+        currentBase,
+
+        previousBase,
+
+        nextBase,
+
+        currentScore:
+          Number(
+            currentScore.total
+              .toFixed(6)
+          ),
+
+        previousScore:
+          Number(
+            previousTotal
+              .toFixed(6)
+          ),
+
+        nextScore:
+          Number(
+            nextTotal
+              .toFixed(6)
+          )
+
+      };
+
+
       continue;
 
     }
 
 
-    /*
-      Exigimos que algum vizinho tenha
-      vantagem real.
-    */
+    /* =====================================
+       INCERTO
+    ===================================== */
 
     if(
       neighborBest <
@@ -2561,13 +3082,51 @@ function resolveBoundarySegments(
       current.reconstructionBoundary =
         "uncertain";
 
+
+      current.boundaryDiagnostic = {
+
+        action:
+          "uncertain",
+
+        currentBase,
+
+        previousBase,
+
+        nextBase,
+
+        currentScore:
+          Number(
+            currentScore.total
+              .toFixed(6)
+          ),
+
+        previousScore:
+          Number(
+            previousTotal
+              .toFixed(6)
+          ),
+
+        nextScore:
+          Number(
+            nextTotal
+              .toFixed(6)
+          )
+
+      };
+
+
       continue;
 
     }
 
 
+    /* =====================================
+       ABSORÇÃO
+    ===================================== */
+
     const source =
-      previousTotal >= nextTotal
+      previousTotal >=
+      nextTotal
       ?
       previous
       :
@@ -2618,11 +3177,68 @@ function resolveBoundarySegments(
         "boundary-absorption",
 
       reconstructionBoundary:
-        previousTotal >= nextTotal
+        previousTotal >=
+        nextTotal
         ?
         "previous"
         :
-        "next"
+        "next",
+
+
+      /*
+        NOVO v2.1:
+
+        mostra explicitamente o que
+        aconteceu na fronteira.
+
+        Isso evita interpretar o objeto
+        reconstruction original como se
+        ainda fosse a decisão final.
+      */
+
+      boundaryDiagnostic:{
+
+        action:
+          "absorbed",
+
+        absorbedFrom:
+          currentBase,
+
+        absorbedTo:
+          baseChordOf(
+            source
+          ),
+
+        finalChord:
+          source.chord,
+
+        side:
+          previousTotal >=
+          nextTotal
+          ?
+          "previous"
+          :
+          "next",
+
+        currentScore:
+          Number(
+            currentScore.total
+              .toFixed(6)
+          ),
+
+        previousScore:
+          Number(
+            previousTotal
+              .toFixed(6)
+          ),
+
+        nextScore:
+          Number(
+            nextTotal
+              .toFixed(6)
+          )
+
+      }
 
     };
 
@@ -2635,9 +3251,7 @@ function resolveBoundarySegments(
 
 
 /* =========================================
-   MERGE APÓS BOUNDARY RESOLUTION
-
-   Só une símbolos realmente iguais.
+   MERGE APÓS BOUNDARY
 ========================================= */
 
 function mergeEquivalentSegments(
@@ -2687,6 +3301,34 @@ function mergeEquivalentSegments(
         );
 
 
+      /*
+        Preserva informação de que houve
+        absorção/merge durante o debug.
+      */
+
+      if(
+        segment.boundaryDiagnostic
+      ){
+
+        if(
+          !Array.isArray(
+            previous.boundaryEvents
+          )
+        ){
+
+          previous.boundaryEvents =
+            [];
+
+        }
+
+
+        previous.boundaryEvents.push(
+          segment.boundaryDiagnostic
+        );
+
+      }
+
+
       continue;
 
     }
@@ -2715,16 +3357,22 @@ export function validateChordTimeline(
 ){
 
   if(
-    !Array.isArray(timeline)
+    !Array.isArray(
+      timeline
+    )
     ||
-    !Array.isArray(frames)
+    !Array.isArray(
+      frames
+    )
   ){
 
-    return Array.isArray(timeline)
-      ?
+    return Array.isArray(
       timeline
-      :
-      [];
+    )
+    ?
+    timeline
+    :
+    [];
 
   }
 
@@ -2752,7 +3400,10 @@ export function validateChordTimeline(
     detectorWeight,
 
     reconstructionWeight:
-      1 - detectorWeight,
+      1
+      -
+      detectorWeight,
+
 
     detectorRange:
       Number.isFinite(
@@ -2767,6 +3418,7 @@ export function validateChordTimeline(
       :
       0.30,
 
+
     minFinalAdvantage:
       Number.isFinite(
         Number(
@@ -2779,6 +3431,7 @@ export function validateChordTimeline(
       )
       :
       0.035,
+
 
     minReconstructionGain:
       Number.isFinite(
@@ -2793,6 +3446,7 @@ export function validateChordTimeline(
       :
       0.025,
 
+
     bassRescueAdvantage:
       Number.isFinite(
         Number(
@@ -2806,6 +3460,7 @@ export function validateChordTimeline(
       :
       0.020,
 
+
     boundaryMaxDuration:
       Number.isFinite(
         Number(
@@ -2818,6 +3473,7 @@ export function validateChordTimeline(
       )
       :
       0.32,
+
 
     boundaryMaxFrames:
       Number.isFinite(
@@ -2835,6 +3491,7 @@ export function validateChordTimeline(
       :
       2,
 
+
     boundaryOwnAdvantage:
       Number.isFinite(
         Number(
@@ -2847,6 +3504,7 @@ export function validateChordTimeline(
       )
       :
       0.045,
+
 
     boundaryNeighborAdvantage:
       Number.isFinite(
@@ -2864,10 +3522,10 @@ export function validateChordTimeline(
   };
 
 
-  /*
-    PASSO 1:
-    reconstrução regional.
-  */
+  /* =====================================
+     PASSO 1
+     VALIDAÇÃO REGIONAL
+  ===================================== */
 
   const validated =
     timeline.map(
@@ -2880,10 +3538,10 @@ export function validateChordTimeline(
     );
 
 
-  /*
-    PASSO 2:
-    frames/segmentos de fronteira.
-  */
+  /* =====================================
+     PASSO 2
+     BOUNDARY VALIDATOR
+  ===================================== */
 
   const boundaries =
     resolveBoundarySegments(
@@ -2893,11 +3551,10 @@ export function validateChordTimeline(
     );
 
 
-  /*
-    PASSO 3:
-    junta regiões que ficaram iguais
-    depois da validação.
-  */
+  /* =====================================
+     PASSO 3
+     MERGE
+  ===================================== */
 
   return mergeEquivalentSegments(
     boundaries
