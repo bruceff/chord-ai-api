@@ -16,6 +16,10 @@ import {
   analyzeWavBuffer
 } from "./audio-engine.js";
 
+import {
+  validateChordTimeline
+} from "./reconstruction-validator.js";
+
 
 /* =========================================
    CONFIGURAÇÃO
@@ -372,12 +376,6 @@ async function getYoutubeMetadata(
 
 /* =========================================
    CRIAR TIMELINE DO BAIXO
-
-   Exemplo:
-
-   D  0.0 → 2.4
-   G  2.4 → 5.0
-   C  5.0 → 7.4
 ========================================= */
 
 function createBassTimeline(
@@ -741,6 +739,9 @@ const server =
             chordEngine:
               "v9",
 
+            reconstructionValidator:
+              "v1",
+
             bassDiagnostics:
               true
 
@@ -779,6 +780,9 @@ const server =
 
             chordEngine:
               "v9",
+
+            reconstructionValidator:
+              "v1",
 
             bassDetector:
               "online"
@@ -1611,6 +1615,10 @@ const server =
             );
 
 
+          /* =================================
+             1. DETECÇÃO ORIGINAL
+          ================================= */
+
           const rawTimeline =
             detectChordTimelineFromChroma(
               analysisFrames,
@@ -1635,20 +1643,51 @@ const server =
             );
 
 
-          const timeline =
-            stabilizeChordTimeline(
+          /* =================================
+             2. RECONSTRUCTION VALIDATOR v1
+          ================================= */
+
+          const validatedTimeline =
+            validateChordTimeline(
               rawTimeline,
+              analysisFrames,
               {
-                minDuration:
-                  0.45
+
+                candidateLimit:
+                  8,
+
+                maxDetectorGap:
+                  0.18,
+
+                minReconstructionGain:
+                  0.055,
+
+                detectorWeight:
+                  0.56
+
               }
             );
 
 
           /* =================================
-             NOVO DIAGNÓSTICO
+             3. ESTABILIZAÇÃO FINAL
           ================================= */
 
+          const timeline =
+            stabilizeChordTimeline(
+              validatedTimeline,
+              {
+
+                minDuration:
+                  0.45
+
+              }
+            );
+
+
+          /* =================================
+             DIAGNÓSTICO DO BAIXO
+          ================================= */
 
           const bassTimeline =
             createBassTimeline(
@@ -1662,6 +1701,53 @@ const server =
               timeline,
               analysisFrames
             );
+
+
+          console.log(
+            "====== RECONSTRUCTION VALIDATOR ======"
+          );
+
+
+          for(
+            const chord
+            of validatedTimeline
+          ){
+
+            console.log(
+
+              chord.start
+                .toFixed(2),
+
+              "→",
+
+              chord.end
+                .toFixed(2),
+
+              "| chord:",
+
+              chord.chord,
+
+              "| validated:",
+
+              chord.reconstructionValidated
+              ??
+              false,
+
+              "| changed:",
+
+              chord.reconstructionChanged
+              ??
+              false,
+
+              "| score:",
+
+              chord.reconstruction?.score
+              ??
+              "-"
+
+            );
+
+          }
 
 
           console.log(
@@ -1730,6 +1816,10 @@ const server =
           }
 
 
+          /* =================================
+             RESPOSTA
+          ================================= */
+
           sendJson(
             res,
             200,
@@ -1746,6 +1836,9 @@ const server =
 
               chordEngine:
                 "v9",
+
+              reconstructionValidator:
+                "v1",
 
               audio:{
 
@@ -1769,6 +1862,9 @@ const server =
               rawChordCount:
                 rawTimeline.length,
 
+              validatedChordCount:
+                validatedTimeline.length,
+
               chordCount:
                 timeline.length,
 
@@ -1776,6 +1872,9 @@ const server =
                 timeline,
 
               debug:{
+
+                reconstructionEnabled:
+                  true,
 
                 bassTimeline,
 
@@ -1872,6 +1971,10 @@ server.listen(
 
     console.log(
       "Chord Engine v9"
+    );
+
+    console.log(
+      "Reconstruction Validator v1"
     );
 
     console.log(
