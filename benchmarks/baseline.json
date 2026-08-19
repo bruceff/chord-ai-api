@@ -1,0 +1,500 @@
+{
+  "generatedAt": "2026-08-19T11:34:48.718Z",
+  "apiUrl": "https://chord-ai-api.onrender.com",
+  "configVersion": 1,
+  "aggregate": {
+    "chordAccuracy": 0.97,
+    "rootAccuracy": 0.99,
+    "qualityAccuracy": 0.98,
+    "bassAccuracy": 0.975,
+    "boundaryF1": 0.8784,
+    "exactSequenceCases": 0,
+    "caseCount": 2
+  },
+  "cases": [
+    {
+      "id": "A",
+      "name": "Regressão harmônica",
+      "file": "benchmarks/benchmark-a.wav",
+      "duration": 20,
+      "engine": {
+        "audioEngine": "v3-bass",
+        "chordEngine": "v9",
+        "reconstructionValidator": "v2"
+      },
+      "counts": {
+        "expected": 8,
+        "actual": 9,
+        "raw": 11,
+        "validated": 9
+      },
+      "summary": {
+        "chordAccuracy": 0.98,
+        "rootAccuracy": 0.99,
+        "qualityAccuracy": 0.99,
+        "bassAccuracy": 0.98,
+        "boundaryF1": 0.9333,
+        "boundaryPrecision": 0.875,
+        "boundaryRecall": 1,
+        "boundaryMaeSeconds": 0.0286,
+        "exactSequence": false
+      },
+      "durationMetrics": {
+        "chordAccuracy": 0.98,
+        "rootAccuracy": 0.99,
+        "qualityAccuracy": 0.99,
+        "bassAccuracy": 0.98,
+        "scoredDuration": 20,
+        "errors": [
+          {
+            "start": 2.2,
+            "end": 2.4,
+            "duration": 0.2,
+            "expected": "Dm7",
+            "actual": "Dm7/C",
+            "rootMatch": true,
+            "qualityMatch": true,
+            "bassMatch": false
+          },
+          {
+            "start": 4.8,
+            "end": 5,
+            "duration": 0.2,
+            "expected": "G7",
+            "actual": "Cmaj7",
+            "rootMatch": false,
+            "qualityMatch": false,
+            "bassMatch": false
+          }
+        ]
+      },
+      "boundaryMetrics": {
+        "toleranceSeconds": 0.3,
+        "precision": 0.875,
+        "recall": 1,
+        "f1": 0.9333,
+        "meanAbsoluteErrorSeconds": 0.0286,
+        "expectedCount": 7,
+        "actualCount": 8,
+        "matches": [
+          {
+            "expected": 2.4,
+            "actual": 2.4,
+            "error": 0
+          },
+          {
+            "expected": 5,
+            "actual": 4.8,
+            "error": 0.2
+          },
+          {
+            "expected": 7.4,
+            "actual": 7.4,
+            "error": 0
+          },
+          {
+            "expected": 10,
+            "actual": 10,
+            "error": 0
+          },
+          {
+            "expected": 12.4,
+            "actual": 12.4,
+            "error": 0
+          },
+          {
+            "expected": 15,
+            "actual": 15,
+            "error": 0
+          },
+          {
+            "expected": 17.4,
+            "actual": 17.4,
+            "error": 0
+          }
+        ],
+        "missed": [],
+        "extras": [
+          2.2
+        ]
+      },
+      "sequence": {
+        "exactSequence": false,
+        "expectedCount": 8,
+        "actualCount": 9,
+        "expected": [
+          "D:m7/D",
+          "G:7/G",
+          "C:maj7/C",
+          "A:m7/A",
+          "F:maj7/F",
+          "B:m7b5/B",
+          "E:7/E",
+          "A:m/A"
+        ],
+        "actual": [
+          "D:m7/D",
+          "D:m7/C",
+          "G:7/G",
+          "C:maj7/C",
+          "A:m7/A",
+          "F:maj7/F",
+          "B:m7b5/B",
+          "E:7/E",
+          "A:m/A"
+        ]
+      },
+      "actualChords": [
+        {
+          "start": 0,
+          "end": 2.2,
+          "chord": "Dm7",
+          "baseChord": "Dm7",
+          "bassNote": "D",
+          "confidence": 0.723,
+          "reconstructionReason": "confirmed"
+        },
+        {
+          "start": 2.2,
+          "end": 2.4,
+          "chord": "Dm7/C",
+          "baseChord": "Dm7",
+          "bassNote": "C",
+          "confidence": 0.57,
+          "reconstructionReason": "confirmed"
+        },
+        {
+          "start": 2.4,
+          "end": 4.8,
+          "chord": "G7",
+          "baseChord": "G7",
+          "bassNote": "G",
+          "confidence": 0.942,
+          "reconstructionReason": "confirmed"
+        },
+        {
+          "start": 4.8,
+          "end": 7.4,
+          "chord": "Cmaj7",
+          "baseChord": "Cmaj7",
+          "bassNote": "C",
+          "confidence": 0.901,
+          "reconstructionReason": "boundary-absorption"
+        },
+        {
+          "start": 7.4,
+          "end": 10,
+          "chord": "Am7",
+          "baseChord": "Am7",
+          "bassNote": "A",
+          "confidence": 0.889,
+          "reconstructionReason": "confirmed"
+        },
+        {
+          "start": 10,
+          "end": 12.4,
+          "chord": "Fmaj7",
+          "baseChord": "Fmaj7",
+          "bassNote": "F",
+          "confidence": 0.916,
+          "reconstructionReason": "confirmed"
+        },
+        {
+          "start": 12.4,
+          "end": 15,
+          "chord": "Bm7b5",
+          "baseChord": "Bm7b5",
+          "bassNote": "B",
+          "confidence": 0.89,
+          "reconstructionReason": "confirmed"
+        },
+        {
+          "start": 15,
+          "end": 17.4,
+          "chord": "E7",
+          "baseChord": "E7",
+          "bassNote": "E",
+          "confidence": 0.936,
+          "reconstructionReason": "confirmed"
+        },
+        {
+          "start": 17.4,
+          "end": 20,
+          "chord": "Am",
+          "baseChord": "Am",
+          "bassNote": "A",
+          "confidence": 0.801,
+          "reconstructionReason": "confirmed"
+        }
+      ],
+      "baselineComparison": {
+        "available": false,
+        "regressions": [],
+        "deltas": {}
+      }
+    },
+    {
+      "id": "B",
+      "name": "Inversões e slash chords",
+      "file": "benchmarks/benchmark-b.wav",
+      "duration": 20,
+      "engine": {
+        "audioEngine": "v3-bass",
+        "chordEngine": "v9",
+        "reconstructionValidator": "v2"
+      },
+      "counts": {
+        "expected": 8,
+        "actual": 11,
+        "raw": 11,
+        "validated": 11
+      },
+      "summary": {
+        "chordAccuracy": 0.96,
+        "rootAccuracy": 0.99,
+        "qualityAccuracy": 0.97,
+        "bassAccuracy": 0.97,
+        "boundaryF1": 0.8235,
+        "boundaryPrecision": 0.7,
+        "boundaryRecall": 1,
+        "boundaryMaeSeconds": 0.0286,
+        "exactSequence": false
+      },
+      "durationMetrics": {
+        "chordAccuracy": 0.96,
+        "rootAccuracy": 0.99,
+        "qualityAccuracy": 0.97,
+        "bassAccuracy": 0.97,
+        "scoredDuration": 20,
+        "errors": [
+          {
+            "start": 2.2,
+            "end": 2.4,
+            "duration": 0.2,
+            "expected": "C/E",
+            "actual": "Cmaj7/E",
+            "rootMatch": true,
+            "qualityMatch": false,
+            "bassMatch": true
+          },
+          {
+            "start": 4.8,
+            "end": 5,
+            "duration": 0.2,
+            "expected": "G/B",
+            "actual": "Cmaj7",
+            "rootMatch": false,
+            "qualityMatch": false,
+            "bassMatch": false
+          },
+          {
+            "start": 9.8,
+            "end": 10,
+            "duration": 0.2,
+            "expected": "F/A",
+            "actual": "F6",
+            "rootMatch": true,
+            "qualityMatch": false,
+            "bassMatch": false
+          },
+          {
+            "start": 17.2,
+            "end": 17.4,
+            "duration": 0.2,
+            "expected": "C/G",
+            "actual": "C",
+            "rootMatch": true,
+            "qualityMatch": true,
+            "bassMatch": false
+          }
+        ]
+      },
+      "boundaryMetrics": {
+        "toleranceSeconds": 0.3,
+        "precision": 0.7,
+        "recall": 1,
+        "f1": 0.8235,
+        "meanAbsoluteErrorSeconds": 0.0286,
+        "expectedCount": 7,
+        "actualCount": 10,
+        "matches": [
+          {
+            "expected": 2.4,
+            "actual": 2.4,
+            "error": 0
+          },
+          {
+            "expected": 5,
+            "actual": 5,
+            "error": 0
+          },
+          {
+            "expected": 7.4,
+            "actual": 7.4,
+            "error": 0
+          },
+          {
+            "expected": 10,
+            "actual": 10,
+            "error": 0
+          },
+          {
+            "expected": 12.4,
+            "actual": 12.4,
+            "error": 0
+          },
+          {
+            "expected": 15,
+            "actual": 15,
+            "error": 0
+          },
+          {
+            "expected": 17.4,
+            "actual": 17.2,
+            "error": 0.2
+          }
+        ],
+        "missed": [],
+        "extras": [
+          2.2,
+          4.8,
+          9.8
+        ]
+      },
+      "sequence": {
+        "exactSequence": false,
+        "expectedCount": 8,
+        "actualCount": 11,
+        "expected": [
+          "C:maj/E",
+          "G:maj/B",
+          "A:m/C",
+          "F:maj/A",
+          "D:m/F",
+          "G:7/F",
+          "C:maj/G",
+          "C:maj/C"
+        ],
+        "actual": [
+          "C:maj/E",
+          "C:maj7/E",
+          "G:maj/B",
+          "C:maj7/C",
+          "A:m/C",
+          "F:maj/A",
+          "F:6/F",
+          "D:m/F",
+          "G:7/F",
+          "C:maj/G",
+          "C:maj/C"
+        ]
+      },
+      "actualChords": [
+        {
+          "start": 0,
+          "end": 2.2,
+          "chord": "C/E",
+          "baseChord": "C",
+          "bassNote": "E",
+          "confidence": 0.851,
+          "reconstructionReason": "confirmed"
+        },
+        {
+          "start": 2.2,
+          "end": 2.4,
+          "chord": "Cmaj7/E",
+          "baseChord": "Cmaj7",
+          "bassNote": "E",
+          "confidence": 0.623,
+          "reconstructionReason": "confirmed"
+        },
+        {
+          "start": 2.4,
+          "end": 4.8,
+          "chord": "G/B",
+          "baseChord": "G",
+          "bassNote": "B",
+          "confidence": 0.853,
+          "reconstructionReason": "confirmed"
+        },
+        {
+          "start": 4.8,
+          "end": 5,
+          "chord": "Cmaj7",
+          "baseChord": "Cmaj7",
+          "bassNote": "C",
+          "confidence": 0.538,
+          "reconstructionReason": "confirmed"
+        },
+        {
+          "start": 5,
+          "end": 7.4,
+          "chord": "Am/C",
+          "baseChord": "Am",
+          "bassNote": "C",
+          "confidence": 0.83,
+          "reconstructionReason": "confirmed"
+        },
+        {
+          "start": 7.4,
+          "end": 9.8,
+          "chord": "F/A",
+          "baseChord": "F",
+          "bassNote": "A",
+          "confidence": 0.842,
+          "reconstructionReason": "confirmed"
+        },
+        {
+          "start": 9.8,
+          "end": 10,
+          "chord": "F6",
+          "baseChord": "F6",
+          "bassNote": "F#",
+          "confidence": 0.605,
+          "reconstructionReason": "reconstruction"
+        },
+        {
+          "start": 10,
+          "end": 12.4,
+          "chord": "Dm/F",
+          "baseChord": "Dm",
+          "bassNote": "F",
+          "confidence": 0.821,
+          "reconstructionReason": "confirmed"
+        },
+        {
+          "start": 12.4,
+          "end": 15,
+          "chord": "G7/F",
+          "baseChord": "G7",
+          "bassNote": "F",
+          "confidence": 0.916,
+          "reconstructionReason": "confirmed"
+        },
+        {
+          "start": 15,
+          "end": 17.2,
+          "chord": "C/G",
+          "baseChord": "C",
+          "bassNote": "G",
+          "confidence": 0.84,
+          "reconstructionReason": "confirmed"
+        },
+        {
+          "start": 17.2,
+          "end": 20,
+          "chord": "C",
+          "baseChord": "C",
+          "bassNote": "C",
+          "confidence": 0.789,
+          "reconstructionReason": "confirmed"
+        }
+      ],
+      "baselineComparison": {
+        "available": false,
+        "regressions": [],
+        "deltas": {}
+      }
+    }
+  ]
+}
