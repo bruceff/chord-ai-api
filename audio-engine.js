@@ -3,19 +3,14 @@ import WavDecoder from "wav-decoder";
 
 
 /* =========================================
-   CHORD AI — AUDIO ENGINE v3
+   CHORD AI — AUDIO ENGINE v4
 
-   WAV
-    ↓
-   PCM mono
-    ↓
-   frames
-    ├── full chroma
-    └── bass detector
-          ↓
-       bassChroma
-          ↓
-       bassNote
+   foco:
+   - chroma completo
+   - bass detector 2.0
+   - correção de harmônicos
+   - bass confidence
+   - persistência temporal
 ========================================= */
 
 
@@ -36,33 +31,6 @@ const NOTE_NAMES = [
   "A",
   "A#",
   "B"
-];
-
-
-/* =========================================
-   FREQUÊNCIAS BASE
-
-   C1 → B1 aproximadamente.
-
-   Depois analisamos múltiplas oitavas
-   da mesma pitch class.
-========================================= */
-
-const BASS_BASE_FREQUENCIES = [
-
-  32.7032, // C1
-  34.6478, // C#1
-  36.7081, // D1
-  38.8909, // D#1
-  41.2034, // E1
-  43.6535, // F1
-  46.2493, // F#1
-  48.9994, // G1
-  51.9131, // G#1
-  55.0000, // A1
-  58.2705, // A#1
-  61.7354  // B1
-
 ];
 
 
@@ -133,7 +101,7 @@ function median(values){
 
 
 /* =========================================
-   NORMALIZAR ARRAY DE 12 VALORES
+   NORMALIZAR VETOR DE 12
 ========================================= */
 
 function normalize12(
@@ -196,28 +164,48 @@ function normalize12(
 
 
 /* =========================================
-   NORMALIZAR CHROMA
+   NOTA MIDI -> FREQUÊNCIA
 ========================================= */
 
-function normalizeChroma(
-  chroma
+function midiToFrequency(
+  midi
 ){
 
-  return normalize12(
-    chroma
+  return (
+    440
+    *
+    Math.pow(
+      2,
+      (
+        midi - 69
+      )
+      /
+      12
+    )
   );
 
 }
 
 
 /* =========================================
+   FREQUÊNCIA -> PITCH CLASS
+========================================= */
+
+function midiToPitchClass(
+  midi
+){
+
+  return (
+    midi % 12
+    +
+    12
+  ) % 12;
+
+}
+
+
+/* =========================================
    GOERTZEL
-
-   Mede a energia de uma frequência
-   específica dentro de um frame.
-
-   Útil para procurar notas graves
-   sem precisar de uma FFT separada.
 ========================================= */
 
 function goertzelPower(
@@ -268,12 +256,6 @@ function goertzelPower(
   let s2 = 0;
 
 
-  /*
-    Janela Hann simples.
-
-    Reduz leakage espectral.
-  */
-
   const length =
     samples.length;
 
@@ -319,8 +301,11 @@ function goertzelPower(
       s2;
 
 
-    s2 = s1;
-    s1 = s0;
+    s2 =
+      s1;
+
+    s1 =
+      s0;
 
   }
 
@@ -346,87 +331,168 @@ function goertzelPower(
 
 
 /* =========================================
-   BASS CHROMA
+   ENERGIA EM TORNO DE UMA FREQUÊNCIA
 
-   Mede cada pitch class em várias
-   oitavas graves.
-
-   Região aproximada:
-   32 Hz → 250 Hz
+   Avalia ligeiramente abaixo, centro e
+   acima para tolerar afinação/desvio.
 ========================================= */
 
-export function extractBassChroma(
+function localFrequencyEnergy(
   samples,
-  sampleRate
+  sampleRate,
+  frequency
 ){
 
-  if(
-    !samples
-    ||
-    samples.length === 0
+  const ratios = [
+    0.985,
+    1.0,
+    1.015
+  ];
+
+
+  let total = 0;
+
+
+  for(
+    const ratio
+    of ratios
   ){
 
-    return new Array(12)
-      .fill(0);
+    total +=
+      Math.log1p(
+        goertzelPower(
+          samples,
+          sampleRate,
+          frequency * ratio
+        )
+      );
 
   }
 
 
-  const result =
-    new Array(12)
-      .fill(0);
+  return total
+    /
+    ratios.length;
+
+}
 
 
-  /*
-    Pesos por oitava.
+/* =========================================
+   BASS SPECTRUM CROMÁTICO
 
-    O grave real recebe maior peso.
-  */
+   MIDI 24 = C1
+   MIDI 52 = E3
 
-  const octaveWeights = [
-    1.00,
-    0.72,
-    0.38
-  ];
+   cobrimos uma faixa suficientemente
+   grave para baixo/fundamental.
+========================================= */
+
+function analyzeBassSpectrum(
+  samples,
+  sampleRate
+){
+
+  const bins = [];
 
 
   for(
-    let pitch = 0;
-    pitch < 12;
-    pitch++
+    let midi = 24;
+    midi <= 52;
+    midi++
   ){
 
-    const base =
-      BASS_BASE_FREQUENCIES[
-        pitch
-      ];
+    const frequency =
+      midiToFrequency(
+        midi
+      );
 
 
-    let energy = 0;
+    const energy =
+      localFrequencyEnergy(
+        samples,
+        sampleRate,
+        frequency
+      );
 
+
+    bins.push({
+
+      midi,
+
+      frequency,
+
+      pitchClass:
+        midiToPitchClass(
+          midi
+        ),
+
+      energy
+
+    });
+
+  }
+
+
+  return bins;
+
+}
+
+
+/* =========================================
+   CORREÇÃO DE HARMÔNICOS
+
+   Se uma nota aguda parece forte apenas
+   porque é harmônico de uma nota mais
+   grave, reduzimos sua força como root.
+========================================= */
+
+function applyHarmonicCorrection(
+  bins
+){
+
+  const corrected =
+    bins.map(
+      bin => ({
+        ...bin,
+        correctedEnergy:
+          bin.energy
+      })
+    );
+
+
+  for(
+    let i = 0;
+    i < corrected.length;
+    i++
+  ){
+
+    const current =
+      corrected[i];
+
+
+    /*
+      Procura aproximadamente:
+      2x frequência = oitava
+      3x frequência = quinta/12ª
+    */
 
     for(
-      let octave = 0;
-      octave < octaveWeights.length;
-      octave++
+      let j = 0;
+      j < corrected.length;
+      j++
     ){
 
-      const frequency =
-        base
-        *
-        Math.pow(
-          2,
-          octave
-        );
+      if(i === j)
+        continue;
 
 
-      /*
-        Ignoramos frequências
-        acima da nossa região de baixo.
-      */
+      const lower =
+        corrected[j];
+
 
       if(
-        frequency > 260
+        lower.frequency >=
+        current.frequency
       ){
 
         continue;
@@ -434,43 +500,151 @@ export function extractBassChroma(
       }
 
 
-      const power =
-        goertzelPower(
-          samples,
-          sampleRate,
-          frequency
-        );
+      const ratio =
+        current.frequency
+        /
+        lower.frequency;
 
 
-      /*
-        log reduz diferenças gigantes
-        entre amplitudes.
-      */
-
-      const compressed =
-        Math.log1p(
-          power
-        );
+      let penalty = 0;
 
 
-      energy +=
-        compressed
-        *
-        octaveWeights[
-          octave
-        ];
+      if(
+        Math.abs(
+          ratio - 2
+        )
+        <
+        0.04
+      ){
+
+        penalty =
+          lower.energy
+          *
+          0.24;
+
+      }
+
+
+      else if(
+        Math.abs(
+          ratio - 3
+        )
+        <
+        0.06
+      ){
+
+        penalty =
+          lower.energy
+          *
+          0.12;
+
+      }
+
+
+      current.correctedEnergy -=
+        penalty;
 
     }
 
 
-    result[pitch] =
-      energy;
+    current.correctedEnergy =
+      Math.max(
+        0,
+        current.correctedEnergy
+      );
+
+  }
+
+
+  return corrected;
+
+}
+
+
+/* =========================================
+   BASS CHROMA v4
+========================================= */
+
+export function extractBassChroma(
+  samples,
+  sampleRate
+){
+
+  const bins =
+    analyzeBassSpectrum(
+      samples,
+      sampleRate
+    );
+
+
+  const corrected =
+    applyHarmonicCorrection(
+      bins
+    );
+
+
+  const chroma =
+    new Array(12)
+      .fill(0);
+
+
+  for(
+    const bin
+    of corrected
+  ){
+
+    /*
+      Quanto mais grave a oitava,
+      maior o peso como possível root.
+    */
+
+    const octave =
+      Math.floor(
+        bin.midi / 12
+      )
+      -
+      1;
+
+
+    let octaveWeight = 1;
+
+
+    if(octave <= 1){
+
+      octaveWeight =
+        1.00;
+
+    }
+
+    else if(octave === 2){
+
+      octaveWeight =
+        0.78;
+
+    }
+
+    else{
+
+      octaveWeight =
+        0.48;
+
+    }
+
+
+    chroma[
+      bin.pitchClass
+    ] +=
+      bin.correctedEnergy
+      *
+      octaveWeight;
 
   }
 
 
   return (
-    normalize12(result)
+    normalize12(
+      chroma
+    )
     ||
     new Array(12)
       .fill(0)
@@ -480,12 +654,15 @@ export function extractBassChroma(
 
 
 /* =========================================
-   BASS CHROMA -> NOTA
+   ANALISAR BASS CHROMA
+
+   retorna:
+   bassNote
+   bassConfidence
 ========================================= */
 
-export function bassChromaToNote(
-  bassChroma,
-  options = {}
+export function analyzeBassChroma(
+  bassChroma
 ){
 
   const normalized =
@@ -494,8 +671,19 @@ export function bassChromaToNote(
     );
 
 
-  if(!normalized)
-    return null;
+  if(!normalized){
+
+    return {
+
+      bassNote:null,
+
+      bassConfidence:0,
+
+      bassMargin:0
+
+    };
+
+  }
 
 
   const ranked =
@@ -518,10 +706,18 @@ export function bassChromaToNote(
 
 
   if(
-    ranked.length === 0
+    ranked.length < 2
   ){
 
-    return null;
+    return {
+
+      bassNote:null,
+
+      bassConfidence:0,
+
+      bassMargin:0
+
+    };
 
   }
 
@@ -531,74 +727,124 @@ export function bassChromaToNote(
 
 
   const second =
-    ranked[1]
-    ||
-    {
-      energy:0
-    };
+    ranked[1];
 
 
-  const minEnergy =
-    Number.isFinite(
-      Number(
-        options.minEnergy
-      )
-    )
-    ?
-    Number(
-      options.minEnergy
-    )
-    :
-    0.42;
-
-
-  const minimumMargin =
-    Number.isFinite(
-      Number(
-        options.minimumMargin
-      )
-    )
-    ?
-    Number(
-      options.minimumMargin
-    )
-    :
-    0.07;
+  const margin =
+    first.energy
+    -
+    second.energy;
 
 
   /*
-    Não inventamos baixo quando
-    o sinal não está claro.
+    Confiança:
+    - força absoluta
+    - margem para segundo colocado
+  */
+
+  const absolute =
+    clamp(
+      (
+        first.energy
+        -
+        0.25
+      )
+      /
+      0.75,
+      0,
+      1
+    );
+
+
+  const separation =
+    clamp(
+      margin
+      /
+      0.22,
+      0,
+      1
+    );
+
+
+  const confidence =
+    absolute * 0.55
+    +
+    separation * 0.45;
+
+
+  /*
+    Só expomos bassNote quando
+    há evidência razoável.
   */
 
   if(
-    first.energy <
-    minEnergy
+    first.energy < 0.34
+    ||
+    margin < 0.035
+    ||
+    confidence < 0.34
   ){
 
-    return null;
+    return {
+
+      bassNote:null,
+
+      bassConfidence:
+        Number(
+          confidence
+            .toFixed(3)
+        ),
+
+      bassMargin:
+        Number(
+          margin
+            .toFixed(3)
+        )
+
+    };
 
   }
 
 
-  if(
-    (
-      first.energy
-      -
-      second.energy
-    )
-    <
-    minimumMargin
-  ){
+  return {
 
-    return null;
+    bassNote:
+      NOTE_NAMES[
+        first.index
+      ],
 
-  }
+    bassConfidence:
+      Number(
+        clamp(
+          confidence,
+          0,
+          0.97
+        )
+        .toFixed(3)
+      ),
+
+    bassMargin:
+      Number(
+        margin
+          .toFixed(3)
+      )
+
+  };
+
+}
 
 
-  return NOTE_NAMES[
-    first.index
-  ];
+/* =========================================
+   COMPATIBILIDADE
+========================================= */
+
+export function bassChromaToNote(
+  bassChroma
+){
+
+  return analyzeBassChroma(
+    bassChroma
+  ).bassNote;
 
 }
 
@@ -613,7 +859,7 @@ export function chromaToNotes(
 ){
 
   const normalized =
-    normalizeChroma(
+    normalize12(
       chroma
     );
 
@@ -699,19 +945,21 @@ export function chromaToNotes(
       );
 
 
+  const strongest =
+    ranked[0]
+    ?
+    ranked[0].energy
+    :
+    0;
+
+
   if(
-    ranked.length === 0
-    ||
-    ranked[0].energy <= 0
+    strongest <= 0
   ){
 
     return [];
 
   }
-
-
-  const strongest =
-    ranked[0].energy;
 
 
   let candidates =
@@ -721,7 +969,9 @@ export function chromaToNotes(
         minimumEnergy
         &&
         item.energy >=
-        strongest * threshold
+        strongest
+        *
+        threshold
     );
 
 
@@ -797,9 +1047,6 @@ export function analyzeAudioFrame(
   if(
     !samples
     ||
-    typeof samples.length !==
-      "number"
-    ||
     samples.length === 0
   ){
 
@@ -808,31 +1055,7 @@ export function analyzeAudioFrame(
       valid:false,
 
       error:
-        "Frame de áudio vazio"
-
-    };
-
-  }
-
-
-  const rate =
-    Number(
-      sampleRate
-    );
-
-
-  if(
-    !Number.isFinite(rate)
-    ||
-    rate <= 0
-  ){
-
-    return {
-
-      valid:false,
-
-      error:
-        "sampleRate inválido"
+        "Frame vazio"
 
     };
 
@@ -840,7 +1063,7 @@ export function analyzeAudioFrame(
 
 
   Meyda.sampleRate =
-    rate;
+    sampleRate;
 
 
   Meyda.bufferSize =
@@ -876,9 +1099,6 @@ export function analyzeAudioFrame(
       valid:false,
 
       error:
-        "Falha ao extrair features",
-
-      detail:
         error.message
 
     };
@@ -897,7 +1117,7 @@ export function analyzeAudioFrame(
       valid:false,
 
       error:
-        "Chroma não disponível"
+        "Chroma indisponível"
 
     };
 
@@ -905,7 +1125,7 @@ export function analyzeAudioFrame(
 
 
   const chroma =
-    normalizeChroma(
+    normalize12(
       features.chroma
     );
 
@@ -913,12 +1133,12 @@ export function analyzeAudioFrame(
   const bassChroma =
     extractBassChroma(
       samples,
-      rate
+      sampleRate
     );
 
 
-  const bassNote =
-    bassChromaToNote(
+  const bass =
+    analyzeBassChroma(
       bassChroma
     );
 
@@ -931,7 +1151,14 @@ export function analyzeAudioFrame(
 
     bassChroma,
 
-    bassNote,
+    bassNote:
+      bass.bassNote,
+
+    bassConfidence:
+      bass.bassConfidence,
+
+    bassMargin:
+      bass.bassMargin,
 
     rms:
       Number(
@@ -954,17 +1181,17 @@ export function analyzeAudioFrame(
 
 
 /* =========================================
-   MEDIANA DE VETORES 12-D
+   MEDIANA VETOR 12
 ========================================= */
 
 function medianVector12(
-  frames
+  vectors
 ){
 
   if(
-    !Array.isArray(frames)
+    !Array.isArray(vectors)
     ||
-    frames.length === 0
+    vectors.length === 0
   ){
 
     return null;
@@ -973,7 +1200,7 @@ function medianVector12(
 
 
   const valid =
-    frames
+    vectors
       .map(
         normalize12
       )
@@ -1019,7 +1246,7 @@ function medianVector12(
 
 
 /* =========================================
-   MEDIANA DE CHROMA
+   MEDIAN CHROMA
 ========================================= */
 
 export function medianChroma(
@@ -1034,7 +1261,7 @@ export function medianChroma(
 
 
 /* =========================================
-   MÉDIA DE CHROMA
+   AVERAGE CHROMA
 ========================================= */
 
 export function averageChroma(
@@ -1174,7 +1401,7 @@ export async function decodeWavBuffer(
 
 
 /* =========================================
-   CONVERTER PARA MONO
+   MONO
 ========================================= */
 
 export function toMono(
@@ -1217,7 +1444,7 @@ export function toMono(
 
 
   for(
-    const samples
+    const channel
     of channelData
   ){
 
@@ -1228,7 +1455,7 @@ export function toMono(
     ){
 
       mono[i] +=
-        samples[i]
+        channel[i]
         /
         channelData.length;
 
@@ -1243,7 +1470,7 @@ export function toMono(
 
 
 /* =========================================
-   LIMIAR DE SILÊNCIO
+   RMS FLOOR
 ========================================= */
 
 function calculateRmsFloor(
@@ -1296,15 +1523,6 @@ function calculateRmsFloor(
     ];
 
 
-  if(
-    maxRms <= 0
-  ){
-
-    return 0.0005;
-
-  }
-
-
   const lowIndex =
     Math.floor(
       values.length * 0.10
@@ -1320,16 +1538,12 @@ function calculateRmsFloor(
     ];
 
 
-  const relativeFloor =
-    maxRms * 0.08;
-
-
   return Math.max(
     0.0003,
 
     Math.min(
       lowLevel * 1.35,
-      relativeFloor
+      maxRms * 0.08
     )
   );
 
@@ -1338,9 +1552,6 @@ function calculateRmsFloor(
 
 /* =========================================
    AGREGAÇÃO TEMPORAL
-
-   Full chroma + bass chroma são
-   suavizados independentemente.
 ========================================= */
 
 function aggregateFrames(
@@ -1371,7 +1582,7 @@ function aggregateFrames(
         options.windowSeconds
       ),
       0.12,
-      1.0
+      1
     )
     :
     0.28;
@@ -1399,12 +1610,6 @@ function aggregateFrames(
     calculateRmsFloor(
       rawFrames
     );
-
-
-  console.log(
-    "[Audio Engine v3] RMS floor:",
-    rmsFloor
-  );
 
 
   const duration =
@@ -1453,13 +1658,13 @@ function aggregateFrames(
 
         bassNote:null,
 
+        bassConfidence:0,
+
         notes:[],
 
         rms:0,
 
-        silence:true,
-
-        sourceFrames:0
+        silence:true
 
       });
 
@@ -1471,38 +1676,34 @@ function aggregateFrames(
 
     const chroma =
       medianVector12(
-
         members.map(
           frame =>
             frame.chroma
         )
-
       );
 
 
     const bassChroma =
       medianVector12(
-
         members.map(
           frame =>
             frame.bassChroma
         )
-
       );
 
 
-    const bassNote =
-      bassChromaToNote(
-        bassChroma,
-        {
+    const bass =
+      analyzeBassChroma(
+        bassChroma
+      );
 
-          minEnergy:
-            0.40,
 
-          minimumMargin:
-            0.06
-
-        }
+    const rms =
+      median(
+        members.map(
+          frame =>
+            frame.rms
+        )
       );
 
 
@@ -1529,15 +1730,6 @@ function aggregateFrames(
       [];
 
 
-    const rms =
-      median(
-        members.map(
-          frame =>
-            frame.rms
-        )
-      );
-
-
     output.push({
 
       time,
@@ -1546,7 +1738,14 @@ function aggregateFrames(
 
       bassChroma,
 
-      bassNote,
+      bassNote:
+        bass.bassNote,
+
+      bassConfidence:
+        bass.bassConfidence,
+
+      bassMargin:
+        bass.bassMargin,
 
       notes,
 
@@ -1559,22 +1758,6 @@ function aggregateFrames(
 
     });
 
-
-    if(
-      output.length <= 12
-    ){
-
-      console.log(
-        "[Audio Engine v3]",
-        time.toFixed(2),
-        "bass:",
-        bassNote,
-        "notes:",
-        notes.join(",")
-      );
-
-    }
-
   }
 
 
@@ -1584,17 +1767,11 @@ function aggregateFrames(
 
 
 /* =========================================
-   PERSISTÊNCIA DO BAIXO
-
-   Evita:
-   A → G# → A → A#
-
-   por um único frame ruidoso.
+   ESTABILIZAR BAIXO
 ========================================= */
 
-function stabilizeBassNotes(
-  frames,
-  radius = 1
+function stabilizeBass(
+  frames
 ){
 
   if(
@@ -1614,18 +1791,18 @@ function stabilizeBassNotes(
       const start =
         Math.max(
           0,
-          index - radius
+          index - 1
         );
 
 
       const end =
         Math.min(
           frames.length - 1,
-          index + radius
+          index + 1
         );
 
 
-      const counts = {};
+      const weighted = {};
 
 
       for(
@@ -1634,29 +1811,48 @@ function stabilizeBassNotes(
         i++
       ){
 
-        const note =
-          frames[i]
-          &&
-          frames[i].bassNote;
+        const neighbor =
+          frames[i];
 
 
-        if(!note)
+        if(
+          !neighbor
+          ||
+          !neighbor.bassNote
+        ){
+
           continue;
 
+        }
 
-        counts[note] =
+
+        const weight =
+          Number(
+            neighbor.bassConfidence
+            ||
+            0
+          );
+
+
+        weighted[
+          neighbor.bassNote
+        ] =
           (
-            counts[note] || 0
+            weighted[
+              neighbor.bassNote
+            ]
+            ||
+            0
           )
           +
-          1;
+          weight;
 
       }
 
 
-      const entries =
+      const ranking =
         Object.entries(
-          counts
+          weighted
         )
         .sort(
           (a,b) =>
@@ -1667,33 +1863,32 @@ function stabilizeBassNotes(
 
 
       if(
-        entries.length === 0
+        ranking.length === 0
       ){
 
         return {
-          ...frame,
-          bassNote:null
+          ...frame
         };
 
       }
 
 
       const [
-        bestNote,
-        count
+        note,
+        score
       ] =
-        entries[0];
+        ranking[0];
 
 
-      const neighborhood =
-        end - start + 1;
+      if(
+        score < 0.55
+      ){
 
+        return {
+          ...frame
+        };
 
-      const stable =
-        count >=
-        Math.ceil(
-          neighborhood * 0.5
-        );
+      }
 
 
       return {
@@ -1701,11 +1896,17 @@ function stabilizeBassNotes(
         ...frame,
 
         bassNote:
-          stable
-          ?
-          bestNote
-          :
-          frame.bassNote
+          note,
+
+        bassConfidence:
+          clamp(
+            Math.max(
+              frame.bassConfidence || 0,
+              score / 3
+            ),
+            0,
+            0.97
+          )
 
       };
 
@@ -1751,6 +1952,13 @@ export async function analyzeWavBuffer(
   }
 
 
+  /*
+    Para detecção grave, 8192 dá
+    resolução melhor que 4096.
+
+    Mantemos configurável.
+  */
+
   const frameSize =
     Number.isFinite(
       Number(
@@ -1764,7 +1972,7 @@ export async function analyzeWavBuffer(
       )
     )
     :
-    4096;
+    8192;
 
 
   const hopSize =
@@ -1785,10 +1993,6 @@ export async function analyzeWavBuffer(
 
   const rawFrames = [];
 
-
-  /* =====================================
-     1. EXTRAÇÃO BRUTA
-  ===================================== */
 
   for(
     let start = 0;
@@ -1836,6 +2040,12 @@ export async function analyzeWavBuffer(
       bassNote:
         analysis.bassNote,
 
+      bassConfidence:
+        analysis.bassConfidence,
+
+      bassMargin:
+        analysis.bassMargin,
+
       rms:
         analysis.rms,
 
@@ -1861,10 +2071,6 @@ export async function analyzeWavBuffer(
   }
 
 
-  /* =====================================
-     2. AGREGAÇÃO
-  ===================================== */
-
   let decisionFrames =
     aggregateFrames(
       rawFrames,
@@ -1883,7 +2089,7 @@ export async function analyzeWavBuffer(
         windowSeconds:
           options.windowSeconds
           ??
-          0.28,
+          0.32,
 
         decisionHopSeconds:
           options.decisionHopSeconds
@@ -1894,45 +2100,9 @@ export async function analyzeWavBuffer(
     );
 
 
-  /* =====================================
-     3. ESTABILIZAR BAIXO
-  ===================================== */
-
   decisionFrames =
-    stabilizeBassNotes(
-      decisionFrames,
-      1
-    );
-
-
-  /* =====================================
-     4. FRAMES FINAIS
-  ===================================== */
-
-  const frames =
-    decisionFrames.map(
-      frame => {
-
-        if(
-          frame.silence
-        ){
-
-          return {
-
-            ...frame,
-
-            notes:[],
-
-            bassNote:null
-
-          };
-
-        }
-
-
-        return frame;
-
-      }
+    stabilizeBass(
+      decisionFrames
     );
 
 
@@ -1949,9 +2119,10 @@ export async function analyzeWavBuffer(
       rawFrames.length,
 
     frameCount:
-      frames.length,
+      decisionFrames.length,
 
-    frames
+    frames:
+      decisionFrames
 
   };
 
@@ -2050,7 +2221,7 @@ export function smoothChromaFrames(
 
 
 /* =========================================
-   TESTE INTERNO
+   TESTE
 ========================================= */
 
 export function createChromaTest(
@@ -2088,7 +2259,8 @@ export function createChromaTest(
       index >= 0
     ){
 
-      chroma[index] = 1;
+      chroma[index] =
+        1;
 
     }
 
@@ -2103,11 +2275,8 @@ export function createChromaTest(
       chromaToNotes(
         chroma,
         {
-
           threshold:0.5,
-
           maxNotes:6
-
         }
       )
 
