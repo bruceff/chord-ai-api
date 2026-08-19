@@ -1,0 +1,81 @@
+name: Benchmark Chord AI
+
+on:
+  workflow_dispatch:
+    inputs:
+      modo:
+        description: "Modo do benchmark"
+        required: true
+        default: "normal"
+        type: choice
+        options:
+          - normal
+          - strict
+          - salvar-baseline
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Baixar repositório
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Instalar dependências
+        run: npm install
+
+      - name: Mostrar arquivos de benchmark
+        run: |
+          echo "Conteúdo da pasta benchmarks:"
+          ls -lah benchmarks || true
+
+      - name: Aguardar API do Render
+        run: |
+          echo "Acordando Chord AI..."
+          
+          for i in {1..20}; do
+            if curl -fsS https://chord-ai-api.onrender.com/health > /dev/null; then
+              echo "API online."
+              exit 0
+            fi
+
+            echo "Tentativa $i/20..."
+            sleep 5
+          done
+
+          echo "A API não respondeu."
+          exit 1
+
+      - name: Rodar benchmark normal
+        if: ${{ inputs.modo == 'normal' }}
+        env:
+          BENCHMARK_API_URL: https://chord-ai-api.onrender.com
+        run: npm run benchmark
+
+      - name: Rodar benchmark strict
+        if: ${{ inputs.modo == 'strict' }}
+        env:
+          BENCHMARK_API_URL: https://chord-ai-api.onrender.com
+        run: npm run benchmark:strict
+
+      - name: Criar nova baseline
+        if: ${{ inputs.modo == 'salvar-baseline' }}
+        env:
+          BENCHMARK_API_URL: https://chord-ai-api.onrender.com
+        run: npm run benchmark:save
+
+      - name: Salvar relatório como artefato
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: chord-ai-benchmark
+          path: |
+            benchmarks/last-result.json
+            benchmarks/baseline.json
+          if-no-files-found: ignore
