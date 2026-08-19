@@ -6,6 +6,7 @@ import {
   getNoteNames,
   detectChord,
   detectChordTimeline,
+  detectChordTimelineFromChroma,
   stabilizeChordTimeline
 } from "./chord-engine.js";
 
@@ -430,9 +431,12 @@ const server =
               "online",
 
             version:
-              "1.1.0",
+              "1.2.0",
 
             audioEngine:
+              true,
+
+            chromaDetection:
               true,
 
             stabilization:
@@ -469,7 +473,10 @@ const server =
               "chord-ai-api",
 
             audioEngine:
-              "online"
+              "online",
+
+            chordEngine:
+              "v3"
 
           }
         );
@@ -922,7 +929,7 @@ const server =
 
 
       /* =====================================
-         TIMELINE DE ACORDES
+         TIMELINE ANTIGA POR NOTAS
       ===================================== */
 
       if(
@@ -979,11 +986,8 @@ const server =
                 minDuration:
                   0.55,
 
-                mergeGap:
-                  0.20,
-
                 confidenceThreshold:
-                  0.48
+                  0.38
 
               }
             );
@@ -996,6 +1000,9 @@ const server =
 
               success:
                 true,
+
+              mode:
+                "notes",
 
               frameCount:
                 frames.length,
@@ -1036,7 +1043,7 @@ const server =
 
 
       /* =====================================
-         DEMONSTRAÇÃO DA TIMELINE
+         TIMELINE DEMO
       ===================================== */
 
       if(
@@ -1328,7 +1335,7 @@ const server =
 
 
       /* =====================================
-         ANALISAR WAV REAL
+         ANALISAR WAV REAL — CHROMA V3
       ===================================== */
 
       if(
@@ -1422,20 +1429,35 @@ const server =
                   0.56,
 
                 maxNotes:
-                  6,
+                  5,
 
                 frameSize:
                   4096,
 
                 hopSize:
-                  2048
+                  2048,
+
+                windowSeconds:
+                  0.28,
+
+                decisionHopSeconds:
+                  0.20
 
               }
             );
 
 
+          /*
+            NOVO:
+
+            Agora não enviamos apenas
+            "frame.notes".
+
+            Enviamos o chroma completo.
+          */
+
           const rawTimeline =
-            detectChordTimeline(
+            detectChordTimelineFromChroma(
 
               audio.frames.map(
                 frame => ({
@@ -1443,8 +1465,8 @@ const server =
                   time:
                     frame.time,
 
-                  notes:
-                    frame.notes
+                  chroma:
+                    frame.chroma
 
                 })
               )
@@ -1460,11 +1482,8 @@ const server =
                 minDuration:
                   0.55,
 
-                mergeGap:
-                  0.20,
-
                 confidenceThreshold:
-                  0.48
+                  0.38
 
               }
             );
@@ -1481,6 +1500,9 @@ const server =
               engine:
                 "Chord AI Audio Engine",
 
+              chordEngine:
+                "v3-chroma",
+
               stabilization:
                 true,
 
@@ -1494,6 +1516,11 @@ const server =
                     audio.duration
                       .toFixed(3)
                   ),
+
+                rawFrameCount:
+                  audio.rawFrameCount
+                  ??
+                  null,
 
                 frameCount:
                   audio.frameCount
@@ -1594,6 +1621,10 @@ server.listen(
 
     console.log(
       "Audio Engine: disponível"
+    );
+
+    console.log(
+      "Chord Engine v3: CHROMA"
     );
 
     console.log(
