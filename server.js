@@ -68,6 +68,7 @@ function sendJson(
     corsHeaders()
   );
 
+
   res.end(
     JSON.stringify(
       data,
@@ -127,11 +128,13 @@ function readBody(req){
 
             finished = true;
 
+
             reject(
               new Error(
                 "Body muito grande"
               )
             );
+
 
             req.destroy();
 
@@ -163,6 +166,7 @@ function readBody(req){
             );
 
           }
+
           catch{
 
             reject(
@@ -233,11 +237,13 @@ function readBinaryBody(req){
 
             finished = true;
 
+
             reject(
               new Error(
                 "Arquivo muito grande"
               )
             );
+
 
             req.destroy();
 
@@ -345,8 +351,7 @@ async function getYoutubeMetadata(
 
   return {
 
-    videoId:
-      videoId,
+    videoId,
 
     title:
       data.title || null,
@@ -366,6 +371,298 @@ async function getYoutubeMetadata(
 
 
 /* =========================================
+   CRIAR TIMELINE DO BAIXO
+
+   Exemplo:
+
+   D  0.0 → 2.4
+   G  2.4 → 5.0
+   C  5.0 → 7.4
+========================================= */
+
+function createBassTimeline(
+  frames,
+  defaultStep = 0.20
+){
+
+  if(
+    !Array.isArray(frames)
+    ||
+    frames.length === 0
+  ){
+
+    return [];
+
+  }
+
+
+  let step =
+    defaultStep;
+
+
+  if(
+    frames.length >= 2
+  ){
+
+    const diff =
+      Number(frames[1].time)
+      -
+      Number(frames[0].time);
+
+
+    if(
+      Number.isFinite(diff)
+      &&
+      diff > 0
+    ){
+
+      step =
+        diff;
+
+    }
+
+  }
+
+
+  const timeline = [];
+
+
+  for(
+    let i = 0;
+    i < frames.length;
+    i++
+  ){
+
+    const frame =
+      frames[i];
+
+
+    const next =
+      frames[
+        i + 1
+      ];
+
+
+    const start =
+      Number(
+        frame.time
+      );
+
+
+    if(
+      !Number.isFinite(start)
+    ){
+
+      continue;
+
+    }
+
+
+    const end =
+      next
+      &&
+      Number.isFinite(
+        Number(next.time)
+      )
+      ?
+      Number(
+        next.time
+      )
+      :
+      start
+      +
+      step;
+
+
+    const bassNote =
+      frame.bassNote
+      ||
+      "N";
+
+
+    const previous =
+      timeline[
+        timeline.length - 1
+      ];
+
+
+    if(
+      previous
+      &&
+      previous.bassNote ===
+      bassNote
+    ){
+
+      previous.end =
+        end;
+
+      previous.frameCount++;
+
+      continue;
+
+    }
+
+
+    timeline.push({
+
+      start,
+
+      end,
+
+      bassNote,
+
+      frameCount:
+        1
+
+    });
+
+  }
+
+
+  return timeline;
+
+}
+
+
+/* =========================================
+   BAIXO DOMINANTE POR REGIÃO DE ACORDE
+========================================= */
+
+function createBassByChordRegion(
+  chordTimeline,
+  frames
+){
+
+  if(
+    !Array.isArray(chordTimeline)
+    ||
+    !Array.isArray(frames)
+  ){
+
+    return [];
+
+  }
+
+
+  return chordTimeline.map(
+    chord => {
+
+      const members =
+        frames.filter(
+          frame =>
+            frame.time >=
+            chord.start
+            &&
+            frame.time <
+            chord.end
+        );
+
+
+      const counts = {};
+
+
+      for(
+        const frame
+        of members
+      ){
+
+        const bass =
+          frame.bassNote;
+
+
+        if(!bass)
+          continue;
+
+
+        counts[bass] =
+          (
+            counts[bass]
+            ||
+            0
+          )
+          +
+          1;
+
+      }
+
+
+      const ranking =
+        Object.entries(
+          counts
+        )
+        .sort(
+          (a,b) =>
+            b[1] - a[1]
+        );
+
+
+      const dominantBass =
+        ranking.length
+        ?
+        ranking[0][0]
+        :
+        null;
+
+
+      const dominantCount =
+        ranking.length
+        ?
+        ranking[0][1]
+        :
+        0;
+
+
+      const bassConfidence =
+        members.length > 0
+        ?
+        dominantCount
+        /
+        members.length
+        :
+        0;
+
+
+      return {
+
+        start:
+          chord.start,
+
+        end:
+          chord.end,
+
+        detectedChord:
+          chord.chord,
+
+        dominantBass,
+
+        bassConfidence:
+          Number(
+            bassConfidence
+              .toFixed(3)
+          ),
+
+        bassRanking:
+          ranking
+            .slice(0,4)
+            .map(
+              ([note,count]) => ({
+
+                note,
+
+                count
+
+              })
+            )
+
+      };
+
+    }
+  );
+
+}
+
+
+/* =========================================
    SERVIDOR
 ========================================= */
 
@@ -380,7 +677,7 @@ const server =
 
 
       /* =====================================
-         PREFLIGHT / CORS
+         CORS / PREFLIGHT
       ===================================== */
 
       if(
@@ -436,21 +733,15 @@ const server =
               "online",
 
             version:
-              "1.3.0",
+              "1.4.0",
 
             audioEngine:
-              "v3",
+              "v3-bass",
 
             chordEngine:
-              "v5",
+              "v9",
 
-            bassDetector:
-              true,
-
-            chromaDetection:
-              true,
-
-            stabilization:
+            bassDiagnostics:
               true
 
           }
@@ -486,11 +777,11 @@ const server =
             audioEngine:
               "v3",
 
-            bassDetector:
-              "online",
-
             chordEngine:
-              "v5"
+              "v9",
+
+            bassDetector:
+              "online"
 
           }
         );
@@ -502,7 +793,7 @@ const server =
 
 
       /* =====================================
-         ANALYZE YOUTUBE
+         YOUTUBE
       ===================================== */
 
       if(
@@ -537,6 +828,7 @@ const server =
                   "videoId inválido"
               }
             );
+
 
             return;
 
@@ -589,12 +881,6 @@ const server =
 
         catch(error){
 
-          console.error(
-            "Erro /analyze:",
-            error
-          );
-
-
           sendJson(
             res,
             500,
@@ -618,7 +904,7 @@ const server =
 
 
       /* =====================================
-         ANALISAR NOME DE ACORDE
+         ACORDE
       ===================================== */
 
       if(
@@ -629,65 +915,49 @@ const server =
         )
       ){
 
-        try{
-
-          const url =
-            new URL(
-              req.url,
-              "http://localhost"
-            );
-
-
-          const name =
-            url.searchParams.get(
-              "name"
-            );
-
-
-          if(!name){
-
-            sendJson(
-              res,
-              400,
-              {
-                error:
-                  "Informe um acorde"
-              }
-            );
-
-            return;
-
-          }
-
-
-          const result =
-            analyzeChord(
-              name
-            );
-
-
-          sendJson(
-            res,
-            result.valid
-              ? 200
-              : 400,
-            result
+        const url =
+          new URL(
+            req.url,
+            "http://localhost"
           );
 
-        }
 
-        catch(error){
+        const name =
+          url.searchParams.get(
+            "name"
+          );
+
+
+        if(!name){
 
           sendJson(
             res,
-            500,
+            400,
             {
               error:
-                error.message
+                "Informe um acorde"
             }
           );
 
+
+          return;
+
         }
+
+
+        const result =
+          analyzeChord(
+            name
+          );
+
+
+        sendJson(
+          res,
+          result.valid
+            ? 200
+            : 400,
+          result
+        );
 
 
         return;
@@ -696,7 +966,7 @@ const server =
 
 
       /* =====================================
-         TRANSPOR ACORDE
+         TRANSPOSIÇÃO
       ===================================== */
 
       if(
@@ -745,23 +1015,15 @@ const server =
             }
           );
 
+
           return;
 
         }
 
 
-        const result =
-          transposeChord(
-            chord,
-            semitones
-          );
-
-
         sendJson(
           res,
-          result
-            ? 200
-            : 400,
+          200,
           {
 
             original:
@@ -769,7 +1031,11 @@ const server =
 
             semitones,
 
-            result
+            result:
+              transposeChord(
+                chord,
+                semitones
+              )
 
           }
         );
@@ -781,7 +1047,7 @@ const server =
 
 
       /* =====================================
-         LISTA DE NOTAS
+         NOTAS
       ===================================== */
 
       if(
@@ -806,7 +1072,7 @@ const server =
 
 
       /* =====================================
-         DETECTAR ACORDE VIA POST
+         DETECTAR ACORDE
       ===================================== */
 
       if(
@@ -859,7 +1125,7 @@ const server =
 
 
       /* =====================================
-         DETECTAR ACORDE VIA GET
+         DETECT VIA GET
       ===================================== */
 
       if(
@@ -893,6 +1159,7 @@ const server =
                 "Informe notes"
             }
           );
+
 
           return;
 
@@ -929,7 +1196,7 @@ const server =
 
 
       /* =====================================
-         TIMELINE ANTIGA POR NOTAS
+         TIMELINE POR NOTAS
       ===================================== */
 
       if(
@@ -946,13 +1213,9 @@ const server =
             );
 
 
-          const frames =
-            body.frames;
-
-
           if(
             !Array.isArray(
-              frames
+              body.frames
             )
           ){
 
@@ -965,6 +1228,7 @@ const server =
               }
             );
 
+
             return;
 
           }
@@ -972,19 +1236,13 @@ const server =
 
           const rawTimeline =
             detectChordTimeline(
-              frames
+              body.frames
             );
 
 
           const timeline =
             stabilizeChordTimeline(
-              rawTimeline,
-              {
-
-                minDuration:
-                  0.45
-
-              }
+              rawTimeline
             );
 
 
@@ -995,12 +1253,6 @@ const server =
 
               success:
                 true,
-
-              mode:
-                "notes",
-
-              frameCount:
-                frames.length,
 
               rawChordCount:
                 rawTimeline.length,
@@ -1049,44 +1301,32 @@ const server =
 
           {
             time:0,
-            notes:[
-              "C","E","G","B"
-            ]
+            notes:["C","E","G","B"]
           },
 
           {
             time:2,
-            notes:[
-              "C","E","G","B"
-            ]
+            notes:["C","E","G","B"]
           },
 
           {
             time:4,
-            notes:[
-              "A","C","E","G"
-            ]
+            notes:["A","C","E","G"]
           },
 
           {
             time:6,
-            notes:[
-              "A","C","E","G"
-            ]
+            notes:["A","C","E","G"]
           },
 
           {
             time:8,
-            notes:[
-              "F","A","C","E"
-            ]
+            notes:["F","A","C","E"]
           },
 
           {
             time:10,
-            notes:[
-              "G","B","D","F"
-            ]
+            notes:["G","B","D","F"]
           }
 
         ];
@@ -1125,7 +1365,7 @@ const server =
 
 
       /* =====================================
-         TESTAR CHROMA
+         CHROMA TEST
       ===================================== */
 
       if(
@@ -1160,6 +1400,7 @@ const server =
             }
           );
 
+
           return;
 
         }
@@ -1174,12 +1415,6 @@ const server =
             );
 
 
-        const result =
-          createChromaTest(
-            notes
-          );
-
-
         sendJson(
           res,
           200,
@@ -1188,10 +1423,10 @@ const server =
             success:
               true,
 
-            input:
-              notes,
-
-            result
+            result:
+              createChromaTest(
+                notes
+              )
 
           }
         );
@@ -1237,36 +1472,10 @@ const server =
               }
             );
 
+
             return;
 
           }
-
-
-          let threshold =
-            Number(
-              body.threshold
-            );
-
-
-          if(
-            !Number.isFinite(
-              threshold
-            )
-          ){
-
-            threshold =
-              0.58;
-
-          }
-
-
-          const notes =
-            chromaToNotes(
-              body.chroma,
-              {
-                threshold
-              }
-            );
 
 
           sendJson(
@@ -1277,7 +1486,20 @@ const server =
               success:
                 true,
 
-              notes
+              notes:
+                chromaToNotes(
+                  body.chroma,
+                  {
+
+                    threshold:
+                      Number(
+                        body.threshold
+                      )
+                      ||
+                      0.58
+
+                  }
+                )
 
             }
           );
@@ -1304,8 +1526,7 @@ const server =
 
 
       /* =====================================
-         ANALISAR WAV REAL
-         CHROMA + BASS DATA
+         ANALISAR WAV
       ===================================== */
 
       if(
@@ -1315,47 +1536,6 @@ const server =
       ){
 
         try{
-
-          const contentType =
-            req.headers[
-              "content-type"
-            ]
-            ||
-            "";
-
-
-          if(
-            !contentType.includes(
-              "audio/wav"
-            )
-            &&
-            !contentType.includes(
-              "audio/x-wav"
-            )
-            &&
-            !contentType.includes(
-              "application/octet-stream"
-            )
-          ){
-
-            sendJson(
-              res,
-              415,
-              {
-
-                error:
-                  "Envie um arquivo WAV",
-
-                receivedContentType:
-                  contentType
-
-              }
-            );
-
-            return;
-
-          }
-
 
           const buffer =
             await readBinaryBody(
@@ -1378,14 +1558,10 @@ const server =
               }
             );
 
+
             return;
 
           }
-
-
-          console.log(
-            `WAV recebido: ${buffer.length} bytes`
-          );
 
 
           const audio =
@@ -1414,17 +1590,6 @@ const server =
               }
             );
 
-
-          /*
-            AGORA ENVIAMOS:
-
-            chroma
-            bassChroma
-            bassNote
-
-            O Chord Engine v6 poderá
-            usar isso diretamente.
-          */
 
           const analysisFrames =
             audio.frames.map(
@@ -1474,43 +1639,95 @@ const server =
             stabilizeChordTimeline(
               rawTimeline,
               {
-
                 minDuration:
                   0.45
-
               }
             );
 
 
-          /*
-            Diagnóstico do baixo.
+          /* =================================
+             NOVO DIAGNÓSTICO
+          ================================= */
 
-            Útil enquanto estamos
-            desenvolvendo o v6.
-          */
 
-          const bassPreview =
-            analysisFrames
-              .slice(
-                0,
-                30
-              )
-              .map(
-                frame => ({
+          const bassTimeline =
+            createBassTimeline(
+              analysisFrames,
+              0.20
+            );
 
-                  time:
-                    Number(
-                      frame.time
-                        .toFixed(2)
-                    ),
 
-                  bassNote:
-                    frame.bassNote
-                    ||
-                    null
+          const bassByChordRegion =
+            createBassByChordRegion(
+              timeline,
+              analysisFrames
+            );
 
-                })
-              );
+
+          console.log(
+            "====== BASS TIMELINE ======"
+          );
+
+
+          for(
+            const item
+            of bassTimeline
+          ){
+
+            console.log(
+
+              item.start
+                .toFixed(2),
+
+              "→",
+
+              item.end
+                .toFixed(2),
+
+              "| bass:",
+
+              item.bassNote
+
+            );
+
+          }
+
+
+          console.log(
+            "====== BASS BY CHORD ======"
+          );
+
+
+          for(
+            const item
+            of bassByChordRegion
+          ){
+
+            console.log(
+
+              item.start
+                .toFixed(2),
+
+              "→",
+
+              item.end
+                .toFixed(2),
+
+              "| chord:",
+
+              item.detectedChord,
+
+              "| bass:",
+
+              item.dominantBass,
+
+              "| confidence:",
+
+              item.bassConfidence
+
+            );
+
+          }
 
 
           sendJson(
@@ -1522,16 +1739,13 @@ const server =
                 true,
 
               engine:
-                "Chord AI Audio Engine",
+                "Chord AI",
 
               audioEngine:
                 "v3-bass",
 
               chordEngine:
-                "v5",
-
-              bassDetector:
-                true,
+                "v9",
 
               audio:{
 
@@ -1545,9 +1759,7 @@ const server =
                   ),
 
                 rawFrameCount:
-                  audio.rawFrameCount
-                  ??
-                  null,
+                  audio.rawFrameCount,
 
                 frameCount:
                   audio.frameCount
@@ -1565,7 +1777,9 @@ const server =
 
               debug:{
 
-                bassPreview
+                bassTimeline,
+
+                bassByChordRegion
 
               }
 
@@ -1653,19 +1867,15 @@ server.listen(
     );
 
     console.log(
-      "Audio Engine v3: disponível"
+      "Audio Engine v3"
     );
 
     console.log(
-      "Bass Detector: disponível"
+      "Chord Engine v9"
     );
 
     console.log(
-      "Chord Engine: v5"
-    );
-
-    console.log(
-      "POST /analyze-wav: disponível"
+      "Bass diagnostics: ON"
     );
 
     console.log(
