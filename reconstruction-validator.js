@@ -6,7 +6,13 @@ import {
 
 /* =========================================
    CHORD AI
-   RECONSTRUCTION VALIDATOR v2.1 — DIAGNOSTIC
+   RECONSTRUCTION VALIDATOR v2.2
+
+   Base:
+   v2.1 Diagnostic
+
+   Novidade:
+   CONTRADICTION RESCUE
 
    Objetivos:
 
@@ -14,21 +20,34 @@ import {
       usando a região inteira;
 
    2. resgatar candidatos plausíveis que
-      ficaram fora do top inicial;
+      ficaram abaixo no detector;
 
    3. exigir ganho acústico real para
-      extensões (7, maj7, 6, 9...);
+      extensões;
 
    4. identificar frames de fronteira sem
       simplesmente apagar acordes curtos;
 
-   5. nunca usar regras específicas para
-      um acorde ou benchmark;
+   5. expor diagnóstico completo;
 
-   6. v2.1:
-      expor diagnóstico completo dos
-      candidatos SEM alterar a decisão
-      musical do v2.
+   6. permitir uma segunda via de decisão
+      quando o acorde atual contradiz uma
+      evidência independente e muito forte
+      de baixo.
+
+   IMPORTANTE:
+
+   Contradiction Rescue NÃO faz o baixo
+   vencer automaticamente.
+
+   Ele exige:
+
+   - baixo muito estável;
+   - original não contém o baixo;
+   - alternativa com root = baixo;
+   - proximidade estrutural;
+   - reconstrução melhor;
+   - distância ainda plausível no detector.
 ========================================= */
 
 
@@ -351,11 +370,6 @@ function dominantBass(
     if(!note)
       continue;
 
-
-    /*
-      Usa confiança real do Bass Detector
-      quando disponível.
-    */
 
     const confidence =
       Number.isFinite(
@@ -1290,14 +1304,10 @@ function marginalExtensionEvidence(
 
 
 /* =========================================
-   CANDIDATOS AMPLIADOS — DECISÃO v2
+   CANDIDATOS AMPLIADOS
 
-   IMPORTANTE:
-
-   ESTA FUNÇÃO FOI MANTIDA IGUAL AO v2.
-
-   Portanto o diagnóstico v2.1 não muda
-   nenhuma decisão musical.
+   Mantido igual ao v2/v2.1 para não
+   alterar globalmente o shortlist.
 ========================================= */
 
 function getExpandedCandidates(
@@ -1310,11 +1320,6 @@ function getExpandedCandidates(
     detectChordCandidatesFromChroma(
       regionChroma,
       {
-
-        /*
-          Mantido em 256 propositalmente
-          para preservar a decisão do v2.
-        */
 
         limit:
           256,
@@ -1348,7 +1353,7 @@ function getExpandedCandidates(
 
   /* =====================================
      GRUPO 1
-     candidatos próximos
+     CANDIDATOS PRÓXIMOS
   ===================================== */
 
   for(
@@ -1376,7 +1381,7 @@ function getExpandedCandidates(
 
   /* =====================================
      GRUPO 2
-     original
+     ORIGINAL
   ===================================== */
 
   const original =
@@ -1399,7 +1404,7 @@ function getExpandedCandidates(
 
   /* =====================================
      GRUPO 3
-     candidate rescue v2
+     BASS ROOT RESCUE
   ===================================== */
 
   if(
@@ -1455,7 +1460,7 @@ function getExpandedCandidates(
 
 
 /* =========================================
-   SCORE FINAL DE CANDIDATO
+   SCORE FINAL NORMAL
 ========================================= */
 
 function scoreCandidate(
@@ -1588,20 +1593,437 @@ function scoreCandidate(
 
 
 /* =========================================
-   DIAGNÓSTICO COMPLETO DE CANDIDATOS — v2.1
+   SIMILARIDADE ESTRUTURAL
 
-   ESTA CAMADA NÃO PARTICIPA DA DECISÃO.
+   Mede:
 
-   Ela observa os 288 templates possíveis:
+   notas compartilhadas
+   /
+   tamanho do menor acorde
 
-   12 roots
-   ×
-   24 qualidades
-   =
-   288 candidatos.
+   Isso detecta hipóteses estruturalmente
+   muito parecidas sem depender do nome.
+========================================= */
 
-   A decisão continua utilizando o
-   getExpandedCandidates() acima.
+function chordStructuralSimilarity(
+  chordA,
+  chordB
+){
+
+  const a =
+    analyzeChord(
+      chordA
+    );
+
+
+  const b =
+    analyzeChord(
+      chordB
+    );
+
+
+  if(
+    !a.valid
+    ||
+    !b.valid
+  ){
+
+    return 0;
+
+  }
+
+
+  const setA =
+    new Set(
+      a.notes
+        .map(
+          normalizeNote
+        )
+        .filter(Boolean)
+    );
+
+
+  const setB =
+    new Set(
+      b.notes
+        .map(
+          normalizeNote
+        )
+        .filter(Boolean)
+    );
+
+
+  let shared = 0;
+
+
+  for(
+    const note
+    of setA
+  ){
+
+    if(
+      setB.has(note)
+    ){
+
+      shared++;
+
+    }
+
+  }
+
+
+  const denominator =
+    Math.min(
+      setA.size,
+      setB.size
+    );
+
+
+  if(
+    denominator <= 0
+  ){
+
+    return 0;
+
+  }
+
+
+  return (
+    shared
+    /
+    denominator
+  );
+
+}
+
+
+/* =========================================
+   CONTRADICTION RESCUE v2.2
+
+   Segunda via de decisão.
+
+   NÃO usa detectorNorm como juiz.
+
+   Ativa somente quando:
+
+   - baixo é altamente estável;
+   - original NÃO contém esse baixo;
+   - alternativa possui root = baixo;
+   - alternativa é estruturalmente próxima;
+   - reconstrução melhora;
+   - detector ainda considera alternativa
+     plausível.
+========================================= */
+
+function findContradictionRescue(
+  original,
+  scored,
+  bass,
+  bestDetectorScore,
+  options
+){
+
+  if(
+    !original
+    ||
+    !bass.note
+    ||
+    bass.ratio <
+    options.contradictionBassRatio
+  ){
+
+    return null;
+
+  }
+
+
+  const originalAnalyzed =
+    analyzeChord(
+      original.chord
+    );
+
+
+  if(
+    !originalAnalyzed.valid
+  ){
+
+    return null;
+
+  }
+
+
+  /*
+    Se o acorde original já contém o baixo,
+    não há contradição estrutural.
+
+    Isso protege inversões legítimas como:
+
+    C/E
+    G/B
+    F/A
+    Dm/F
+    G7/F
+  */
+
+  if(
+    originalAnalyzed.notes.includes(
+      bass.note
+    )
+  ){
+
+    return null;
+
+  }
+
+
+  const eligible = [];
+
+
+  for(
+    const candidate
+    of scored
+  ){
+
+    if(
+      candidate.chord ===
+      original.chord
+    ){
+
+      continue;
+
+    }
+
+
+    const analyzed =
+      analyzeChord(
+        candidate.chord
+      );
+
+
+    if(
+      !analyzed.valid
+    ){
+
+      continue;
+
+    }
+
+
+    /*
+      Nesta primeira versão, uma hipótese
+      de Contradiction Rescue precisa ter
+      root igual ao baixo independente.
+    */
+
+    if(
+      analyzed.root !==
+      bass.note
+    ){
+
+      continue;
+
+    }
+
+
+    if(
+      !analyzed.notes.includes(
+        bass.note
+      )
+    ){
+
+      continue;
+
+    }
+
+
+    const detectorGap =
+      bestDetectorScore
+      -
+      candidate.score;
+
+
+    /*
+      O detector não decide a disputa,
+      porém continua sendo um gate contra
+      candidatos absurdamente distantes.
+    */
+
+    if(
+      detectorGap >
+      options.contradictionMaxDetectorGap
+    ){
+
+      continue;
+
+    }
+
+
+    const structuralSimilarity =
+      chordStructuralSimilarity(
+        original.chord,
+        candidate.chord
+      );
+
+
+    if(
+      structuralSimilarity <
+      options.contradictionMinStructuralSimilarity
+    ){
+
+      continue;
+
+    }
+
+
+    const reconstructionGain =
+      candidate.metrics.score
+      -
+      original.metrics.score;
+
+
+    if(
+      reconstructionGain <
+      options.contradictionMinReconstructionGain
+    ){
+
+      continue;
+
+    }
+
+
+    const bassCompatibilityGain =
+      candidate.metrics.bassCompatibility
+      -
+      original.metrics.bassCompatibility;
+
+
+    if(
+      bassCompatibilityGain <=
+      0
+    ){
+
+      continue;
+
+    }
+
+
+    eligible.push({
+
+      candidate,
+
+      detectorGap,
+
+      structuralSimilarity,
+
+      reconstructionGain,
+
+      bassCompatibilityGain
+
+    });
+
+  }
+
+
+  if(
+    eligible.length === 0
+  ){
+
+    return null;
+
+  }
+
+
+  /*
+    Em contradiction mode:
+
+    1. maior reconstruction score;
+    2. maior semelhança estrutural;
+    3. maior melhoria do baixo;
+    4. menor detector gap.
+
+    detectorNorm NÃO participa.
+  */
+
+  eligible.sort(
+    (a,b) => {
+
+      const reconstructionDifference =
+        b.candidate.metrics.score
+        -
+        a.candidate.metrics.score;
+
+
+      if(
+        Math.abs(
+          reconstructionDifference
+        )
+        >
+        0.000001
+      ){
+
+        return reconstructionDifference;
+
+      }
+
+
+      const structuralDifference =
+        b.structuralSimilarity
+        -
+        a.structuralSimilarity;
+
+
+      if(
+        Math.abs(
+          structuralDifference
+        )
+        >
+        0.000001
+      ){
+
+        return structuralDifference;
+
+      }
+
+
+      const bassDifference =
+        b.bassCompatibilityGain
+        -
+        a.bassCompatibilityGain;
+
+
+      if(
+        Math.abs(
+          bassDifference
+        )
+        >
+        0.000001
+      ){
+
+        return bassDifference;
+
+      }
+
+
+      return (
+        a.detectorGap
+        -
+        b.detectorGap
+      );
+
+    }
+  );
+
+
+  return eligible[0];
+
+}
+
+
+/* =========================================
+   DIAGNÓSTICO COMPLETO v2.2
+
+   Continua observando todos os 288
+   templates sem alterar o shortlist.
 ========================================= */
 
 function buildCandidateDiagnostics(
@@ -1858,7 +2280,8 @@ function buildCandidateDiagnostics(
 
             bassCompatibility:
               Number(
-                scored.metrics.bassCompatibility
+                scored.metrics
+                  .bassCompatibility
                   .toFixed(6)
               ),
 
@@ -1906,6 +2329,19 @@ function buildCandidateDiagnostics(
                   .toFixed(6)
               ),
 
+            structuralSimilarityToOriginal:
+              originalBase
+              ?
+              Number(
+                chordStructuralSimilarity(
+                  originalBase,
+                  candidate.chord
+                )
+                .toFixed(6)
+              )
+              :
+              null,
+
             inDecisionShortlist:
               decisionSet.has(
                 candidate.chord
@@ -1920,10 +2356,6 @@ function buildCandidateDiagnostics(
       .filter(Boolean);
 
 
-  /* =====================================
-     TOP POR FINAL SCORE
-  ===================================== */
-
   const byFinalScore =
     [...diagnosticScored]
       .sort(
@@ -1933,14 +2365,6 @@ function buildCandidateDiagnostics(
           a.finalScore
       );
 
-
-  /* =====================================
-     TODOS OS MELHORES COM ROOT = BASS
-
-     Esse bloco é essencial para descobrir
-     casos como um candidato correto que
-     nunca entrou no Candidate Rescue.
-  ===================================== */
 
   const bassRootCandidates =
     bass.note
@@ -2029,30 +2453,12 @@ function buildCandidateDiagnostics(
     },
 
 
-    /*
-      Top 12 candidatos pelo score FINAL
-      calculado com a fórmula atual.
-
-      Isso NÃO altera quem vence.
-    */
-
     topCandidates:
       byFinalScore.slice(
         0,
         12
       ),
 
-
-    /*
-      Top candidatos cuja ROOT coincide
-      com o baixo regional.
-
-      Exemplo:
-      bass = B
-
-      aqui veremos B, Bm, B7, Bm7b5,
-      Bdim, etc.
-    */
 
     bassRootCandidates
 
@@ -2206,13 +2612,6 @@ function validateRegion(
     );
 
 
-  /*
-    IMPORTANTE:
-
-    essa continua sendo a mesma função
-    decisória do v2.
-  */
-
   const candidates =
     getExpandedCandidates(
       regionChroma,
@@ -2240,13 +2639,6 @@ function validateRegion(
 
   }
 
-
-  /* =====================================
-     v2.1 DIAGNÓSTICO
-
-     Observa 288 candidatos sem alterar
-     os candidatos de decisão.
-  ===================================== */
 
   const diagnostics =
     buildCandidateDiagnostics(
@@ -2358,9 +2750,7 @@ function validateRegion(
 
 
   /* =====================================
-     CANDIDATE RESCUE v2
-
-     MANTIDO INALTERADO.
+     RESCUE v2 ORIGINAL
   ===================================== */
 
   const originalAnalyzed =
@@ -2407,6 +2797,10 @@ function validateRegion(
     options.bassRescueAdvantage;
 
 
+  /* =====================================
+     DECISÃO NORMAL
+  ===================================== */
+
   const normalSwitch =
     winner.chord !==
     original.chord
@@ -2418,7 +2812,66 @@ function validateRegion(
     options.minReconstructionGain;
 
 
-  const shouldSwitch =
+  /* =====================================
+     CONTRADICTION RESCUE v2.2
+  ===================================== */
+
+  const contradictionRescue =
+    findContradictionRescue(
+      original,
+      scored,
+      bass,
+      bestDetectorScore,
+      options
+    );
+
+
+  const contradictionCandidate =
+    contradictionRescue
+    ?
+    contradictionRescue.candidate
+    :
+    null;
+
+
+  /* =====================================
+     ESCOLHA FINAL
+
+     prioridade:
+
+     1. Contradiction Rescue
+     2. decisão normal / Bass Rescue antigo
+     3. original
+  ===================================== */
+
+  let chosen =
+    original;
+
+
+  let shouldSwitch =
+    false;
+
+
+  let decisionReason =
+    "confirmed";
+
+
+  if(
+    contradictionCandidate
+  ){
+
+    chosen =
+      contradictionCandidate;
+
+    shouldSwitch =
+      true;
+
+    decisionReason =
+      "contradiction-rescue";
+
+  }
+
+  else if(
     winner.chord !==
     original.chord
     &&
@@ -2426,15 +2879,23 @@ function validateRegion(
       normalSwitch
       ||
       bassRescue
-    );
+    )
+  ){
 
+    chosen =
+      winner;
 
-  const chosen =
-    shouldSwitch
-    ?
-    winner
-    :
-    original;
+    shouldSwitch =
+      true;
+
+    decisionReason =
+      bassRescue
+      ?
+      "bass-rescue"
+      :
+      "reconstruction";
+
+  }
 
 
   const runnerUp =
@@ -2470,6 +2931,15 @@ function validateRegion(
       0
     );
 
+
+  /*
+    Se houve Contradiction Rescue,
+    chosen.finalScore ainda contém
+    detectorNorm baixo.
+
+    Por isso a confiança continua
+    conservadora; não fingimos certeza.
+  */
 
   const newConfidence =
     clamp(
@@ -2550,24 +3020,7 @@ function validateRegion(
       shouldSwitch,
 
     reconstructionReason:
-      shouldSwitch
-      ?
-      (
-        bassRescue
-        ?
-        "bass-rescue"
-        :
-        "reconstruction"
-      )
-      :
-      "confirmed",
-
-
-    /* =====================================
-       NOVO v2.1
-
-       diagnóstico completo.
-    ===================================== */
+      decisionReason,
 
     reconstructionDiagnostics:
       diagnostics,
@@ -2606,16 +3059,72 @@ function validateRegion(
       selected:
         selectedBase,
 
+
+      /* =================================
+         NOVO v2.2
+      ================================= */
+
+      contradictionRescue:
+        contradictionRescue
+        ?
+        {
+
+          candidate:
+            contradictionRescue
+              .candidate
+              .chord,
+
+          structuralSimilarity:
+            Number(
+              contradictionRescue
+                .structuralSimilarity
+                .toFixed(3)
+            ),
+
+          reconstructionGain:
+            Number(
+              contradictionRescue
+                .reconstructionGain
+                .toFixed(3)
+            ),
+
+          bassCompatibilityGain:
+            Number(
+              contradictionRescue
+                .bassCompatibilityGain
+                .toFixed(3)
+            ),
+
+          detectorGap:
+            Number(
+              contradictionRescue
+                .detectorGap
+                .toFixed(3)
+            )
+
+        }
+        :
+        null,
+
+
       reconstructionGain:
         Number(
-          reconstructionGain
-            .toFixed(3)
+          (
+            chosen.metrics.score
+            -
+            original.metrics.score
+          )
+          .toFixed(3)
         ),
 
       finalAdvantage:
         Number(
-          finalAdvantage
-            .toFixed(3)
+          (
+            chosen.finalScore
+            -
+            original.finalScore
+          )
+          .toFixed(3)
         ),
 
       detectorNorm:
@@ -2674,8 +3183,7 @@ function validateRegion(
 
 
 /* =========================================
-   RECONSTRUÇÃO DE UM ACORDE
-   PARA BOUNDARY VALIDATOR
+   RECONSTRUÇÃO PARA BOUNDARY VALIDATOR
 ========================================= */
 
 function reconstructionForBase(
@@ -3184,18 +3692,6 @@ function resolveBoundarySegments(
         :
         "next",
 
-
-      /*
-        NOVO v2.1:
-
-        mostra explicitamente o que
-        aconteceu na fronteira.
-
-        Isso evita interpretar o objeto
-        reconstruction original como se
-        ainda fosse a decisão final.
-      */
-
       boundaryDiagnostic:{
 
         action:
@@ -3300,11 +3796,6 @@ function mergeEquivalentSegments(
           .toFixed(3)
         );
 
-
-      /*
-        Preserva informação de que houve
-        absorção/merge durante o debug.
-      */
 
       if(
         segment.boundaryDiagnostic
@@ -3460,6 +3951,74 @@ export function validateChordTimeline(
       :
       0.020,
 
+
+    /* =====================================
+       CONTRADICTION RESCUE v2.2
+    ===================================== */
+
+    contradictionBassRatio:
+      Number.isFinite(
+        Number(
+          userOptions.contradictionBassRatio
+        )
+      )
+      ?
+      Number(
+        userOptions.contradictionBassRatio
+      )
+      :
+      0.88,
+
+
+    contradictionMaxDetectorGap:
+      Number.isFinite(
+        Number(
+          userOptions.contradictionMaxDetectorGap
+        )
+      )
+      ?
+      Number(
+        userOptions.contradictionMaxDetectorGap
+      )
+      :
+      0.20,
+
+
+    contradictionMinStructuralSimilarity:
+      Number.isFinite(
+        Number(
+          userOptions
+            .contradictionMinStructuralSimilarity
+        )
+      )
+      ?
+      Number(
+        userOptions
+          .contradictionMinStructuralSimilarity
+      )
+      :
+      0.70,
+
+
+    contradictionMinReconstructionGain:
+      Number.isFinite(
+        Number(
+          userOptions
+            .contradictionMinReconstructionGain
+        )
+      )
+      ?
+      Number(
+        userOptions
+          .contradictionMinReconstructionGain
+      )
+      :
+      0.025,
+
+
+    /* =====================================
+       BOUNDARY
+    ===================================== */
 
     boundaryMaxDuration:
       Number.isFinite(
