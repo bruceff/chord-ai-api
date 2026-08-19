@@ -1,15 +1,11 @@
 /* =========================================
-   CHORD AI — CHORD ENGINE v4
+   CHORD AI — CHORD ENGINE v5
 
-   Chroma
-      ↓
-   candidatos por frame
-      ↓
-   score harmônico
-      ↓
-   decoder temporal
-      ↓
-   timeline estável
+   foco:
+   - root-aware scoring
+   - evitar subconjuntos indevidos
+   - preservar acordes complexos reais
+   - decoder temporal continua ativo
 ========================================= */
 
 
@@ -184,16 +180,12 @@ function noteIndex(
 ){
 
   const normalized =
-    normalizeNote(
-      note
-    );
+    normalizeNote(note);
 
 
   return normalized
     ?
-    NOTES.indexOf(
-      normalized
-    )
+    NOTES.indexOf(normalized)
     :
     -1;
 
@@ -260,7 +252,7 @@ function normalizeChroma(
 
 
 /* =========================================
-   QUALIDADE -> TEXTO
+   QUALIDADE -> SÍMBOLO
 ========================================= */
 
 function qualityToSymbol(
@@ -344,9 +336,11 @@ function qualityToSymbol(
   };
 
 
-  return map[quality]
+  return (
+    map[quality]
     ??
-    quality.toLowerCase();
+    quality.toLowerCase()
+  );
 
 }
 
@@ -414,7 +408,7 @@ function normalizeQuality(
 
 
 /* =========================================
-   PARSE DO SÍMBOLO
+   PARSE
 ========================================= */
 
 function parseChordSymbol(
@@ -542,9 +536,7 @@ export function analyzeChord(
 ){
 
   const parsed =
-    parseChordSymbol(
-      symbol
-    );
+    parseChordSymbol(symbol);
 
 
   if(!parsed){
@@ -626,8 +618,7 @@ export function analyzeChord(
 
       ...notes.filter(
         note =>
-          note !==
-          parsed.bass
+          note !== parsed.bass
       )
 
     ];
@@ -674,9 +665,7 @@ export function transposeChord(
 ){
 
   const parsed =
-    parseChordSymbol(
-      symbol
-    );
+    parseChordSymbol(symbol);
 
 
   if(!parsed)
@@ -715,7 +704,7 @@ export function transposeChord(
 
 
 /* =========================================
-   COMPLEXIDADE
+   PITCH CLASSES
 ========================================= */
 
 function getPitchClasses(
@@ -734,70 +723,52 @@ function getPitchClasses(
 }
 
 
-function complexityPenalty(
-  quality,
-  intervals
+/* =========================================
+   CLASSIFICAÇÃO DE COMPLEXIDADE
+========================================= */
+
+function isExtendedQuality(
+  quality
 ){
 
-  const size =
-    getPitchClasses(
-      intervals
-    ).length;
+  return [
+    "9",
+    "MAJ9",
+    "MIN9",
+    "ADD9",
+    "MINADD9",
+    "7B9",
+    "7#9",
+    "MAJ7#11"
+  ].includes(
+    quality
+  );
+
+}
 
 
-  let penalty = 0;
+function isSeventhQuality(
+  quality
+){
 
-
-  if(
-    size > 3
-  ){
-
-    penalty +=
-      (
-        size - 3
-      )
-      *
-      0.035;
-
-  }
-
-
-  /*
-    Extensões recebem uma pequena
-    penalidade adicional.
-
-    Elas ainda podem vencer,
-    mas precisam de evidência real.
-  */
-
-  if(
-    [
-      "9",
-      "MAJ9",
-      "MIN9",
-      "ADD9",
-      "MINADD9",
-      "7B9",
-      "7#9",
-      "MAJ7#11"
-    ].includes(
-      quality
-    )
-  ){
-
-    penalty +=
-      0.045;
-
-  }
-
-
-  return penalty;
+  return [
+    "7",
+    "MIN7",
+    "MAJ7",
+    "DIM7",
+    "MIN7B5",
+    "7SUS4",
+    "7B5",
+    "7#5"
+  ].includes(
+    quality
+  );
 
 }
 
 
 /* =========================================
-   SCORE DE UM ACORDE CONTRA CHROMA
+   SCORE DO TEMPLATE — v5
 ========================================= */
 
 function scoreChordTemplate(
@@ -830,7 +801,20 @@ function scoreChordTemplate(
     );
 
 
-  let insideEnergy = 0;
+  const structural =
+    pitches.map(
+      pitch =>
+        chroma[pitch]
+    );
+
+
+  let insideEnergy =
+    structural.reduce(
+      (sum,value) =>
+        sum + value,
+      0
+    );
+
 
   let outsideEnergy = 0;
 
@@ -842,15 +826,8 @@ function scoreChordTemplate(
   ){
 
     if(
-      set.has(i)
+      !set.has(i)
     ){
-
-      insideEnergy +=
-        chroma[i];
-
-    }
-
-    else{
 
       outsideEnergy +=
         chroma[i];
@@ -860,33 +837,24 @@ function scoreChordTemplate(
   }
 
 
-  const structural =
-    pitches.map(
-      pitch =>
-        chroma[pitch]
-    );
+  const totalEnergy =
+    insideEnergy
+    +
+    outsideEnergy
+    +
+    1e-9;
+
+
+  const explainedRatio =
+    insideEnergy
+    /
+    totalEnergy;
 
 
   const averageInside =
-    structural.reduce(
-      (sum,value) =>
-        sum + value,
-      0
-    )
-    /
-    structural.length;
-
-
-  const explained =
     insideEnergy
     /
-    (
-      insideEnergy
-      +
-      outsideEnergy
-      +
-      1e-9
-    );
+    structural.length;
 
 
   const rootEnergy =
@@ -895,55 +863,212 @@ function scoreChordTemplate(
     ];
 
 
-  let score =
-    averageInside * 0.54
-    +
-    explained * 0.38
-    +
-    rootEnergy * 0.08;
+  const weakestStructural =
+    Math.min(
+      ...structural
+    );
+
+
+  const strongestStructural =
+    Math.max(
+      ...structural
+    );
 
 
   /*
-    Energia externa forte
-    diminui a confiança.
+    Base score.
   */
+
+  let score =
+    averageInside * 0.44
+    +
+    explainedRatio * 0.34
+    +
+    rootEnergy * 0.14
+    +
+    weakestStructural * 0.08;
+
+
+  /* =====================================
+     ROOT BONUS
+
+     Esse é o ponto principal do v5.
+
+     Um acorde cuja fundamental está
+     realmente presente ganha vantagem.
+  ===================================== */
+
+  if(
+    rootEnergy >= 0.55
+  ){
+
+    score +=
+      0.08;
+
+  }
+
+
+  if(
+    rootEnergy >= 0.75
+  ){
+
+    score +=
+      0.06;
+
+  }
+
+
+  /* =====================================
+     ROOT ABSENT PENALTY
+
+     Exemplo:
+     G7 = G B D F
+     Bdim = B D F
+
+     Se G estiver forte, Bdim precisa
+     perder por não explicá-lo.
+  ===================================== */
+
+  if(
+    rootEnergy < 0.20
+  ){
+
+    score -=
+      0.11;
+
+  }
+
+
+  if(
+    rootEnergy < 0.10
+  ){
+
+    score -=
+      0.08;
+
+  }
+
+
+  /* =====================================
+     OUTSIDE ENERGY
+  ===================================== */
 
   score -=
     (
-      outsideEnergy / 12
+      outsideEnergy
+      /
+      12
     )
     *
-    0.14;
+    0.16;
 
 
-  /*
-    Notas estruturais praticamente
-    ausentes diminuem o score.
-  */
+  /* =====================================
+     NOTAS ESTRUTURAIS FRACAS
+  ===================================== */
 
-  const weakNotes =
+  const weakStructural =
     structural.filter(
       energy =>
-        energy < 0.20
+        energy < 0.18
     ).length;
 
 
   score -=
-    weakNotes
+    weakStructural
     *
-    0.075;
+    0.07;
 
 
-  /*
-    Extensões precisam realmente existir.
+  /* =====================================
+     BÔNUS PARA TÉTRADE REAL
 
-    Exemplo:
-    Am deve vencer Fmaj7 se a nota F
-    tiver energia muito pequena.
-  */
+     Se a quarta nota estrutural está forte,
+     não penalizamos o acorde de 4 notas.
+
+     Isso resolve:
+     Dm7 vs F
+     G7 vs Bdim
+     Am7 vs C
+     E7 vs G#dim
+  ===================================== */
+
+  if(
+    pitches.length === 4
+  ){
+
+    const fourthEnergy =
+      structural[3];
+
+
+    if(
+      fourthEnergy >= 0.38
+    ){
+
+      score +=
+        0.08;
+
+    }
+
+
+    if(
+      fourthEnergy >= 0.55
+    ){
+
+      score +=
+        0.05;
+
+    }
+
+  }
+
+
+  /* =====================================
+     PENALIDADE DE COMPLEXIDADE
+
+     Bem mais leve para 7th chords.
+  ===================================== */
 
   if(
     pitches.length > 3
+  ){
+
+    if(
+      isSeventhQuality(
+        quality
+      )
+    ){
+
+      score -=
+        0.015;
+
+    }
+
+    else{
+
+      score -=
+        (
+          pitches.length - 3
+        )
+        *
+        0.025;
+
+    }
+
+  }
+
+
+  /* =====================================
+     EXTENSÕES
+
+     9/add9 etc precisam de energia
+     real na nota extra.
+  ===================================== */
+
+  if(
+    isExtendedQuality(
+      quality
+    )
   ){
 
     const extensionPitches =
@@ -962,44 +1087,130 @@ function scoreChordTemplate(
       extensionPitches.length;
 
 
+    score -=
+      0.035;
+
+
     if(
-      extensionEnergy < 0.30
+      extensionEnergy < 0.32
     ){
 
       score -=
         (
-          0.30
+          0.32
           -
           extensionEnergy
         )
         *
-        0.35;
+        0.42;
+
+    }
+
+
+    if(
+      extensionEnergy >= 0.55
+    ){
+
+      score +=
+        0.04;
 
     }
 
   }
 
 
-  score -=
-    complexityPenalty(
-      quality,
-      intervals
-    );
+  /* =====================================
+     SUBSET PENALTY
+
+     Se há uma nota forte fora do acorde,
+     uma tríade não deve simplesmente
+     ignorá-la.
+
+     É justamente o caso:
+     F vs Dm7
+     C vs Am7
+     Bdim vs G7
+  ===================================== */
+
+  if(
+    pitches.length === 3
+  ){
+
+    let strongOutside = 0;
+
+
+    for(
+      let i = 0;
+      i < 12;
+      i++
+    ){
+
+      if(
+        !set.has(i)
+        &&
+        chroma[i] >= 0.45
+      ){
+
+        strongOutside++;
+
+      }
+
+    }
+
+
+    score -=
+      strongOutside
+      *
+      0.085;
+
+  }
+
+
+  /* =====================================
+     CONSISTÊNCIA INTERNA
+
+     Acordes onde uma nota estrutural
+     é absurdamente mais fraca que outra
+     recebem pequena penalidade.
+  ===================================== */
+
+  if(
+    strongestStructural > 0
+  ){
+
+    const balance =
+      weakestStructural
+      /
+      strongestStructural;
+
+
+    if(
+      balance < 0.18
+    ){
+
+      score -=
+        0.06;
+
+    }
+
+  }
 
 
   return {
 
     score,
 
+    pitches,
+
+    rootEnergy,
+
     insideEnergy,
 
     outsideEnergy,
 
-    explained,
+    explainedRatio,
 
-    rootEnergy,
-
-    pitches
+    weakestStructural
 
   };
 
@@ -1059,8 +1270,7 @@ export function detectChordCandidatesFromChroma(
         quality,
         intervals
       ]
-      of
-      Object.entries(
+      of Object.entries(
         CHORD_TYPES
       )
     ){
@@ -1100,10 +1310,13 @@ export function detectChordCandidatesFromChroma(
           result.score,
 
         explainedRatio:
-          result.explained,
+          result.explainedRatio,
 
         rootEnergy:
-          result.rootEnergy
+          result.rootEnergy,
+
+        weakestStructural:
+          result.weakestStructural
 
       });
 
@@ -1166,7 +1379,7 @@ export function detectChordCandidatesFromChroma(
 
 
 /* =========================================
-   DETECTAR MELHOR ACORDE
+   DETECTAR ACORDE
 ========================================= */
 
 export function detectChordFromChroma(
@@ -1259,10 +1472,7 @@ export function detectChordFromChroma(
       best.notes,
 
     alternatives:
-      candidates
-        .slice(
-          1
-        )
+      candidates.slice(1)
 
   };
 
@@ -1313,8 +1523,7 @@ export function detectChord(
       index >= 0
     ){
 
-      chroma[index] =
-        1;
+      chroma[index] = 1;
 
     }
 
@@ -1329,19 +1538,7 @@ export function detectChord(
 
 
 /* =========================================
-   DECODER TEMPORAL — V4
-
-   Dynamic Programming / Viterbi simplificado.
-
-   Ao invés de escolher isoladamente:
-
-   F
-   F
-   A#madd9
-   F
-
-   ele considera o custo de abandonar F
-   e voltar imediatamente para F.
+   DECODER TEMPORAL
 ========================================= */
 
 export function decodeChordSequenceFromChroma(
@@ -1384,10 +1581,12 @@ export function decodeChordSequenceFromChroma(
             detectChordCandidatesFromChroma(
               frame.chroma,
               {
+
                 limit:
                   options.candidateLimit
                   ??
                   6
+
               }
             );
 
@@ -1456,11 +1655,6 @@ export function decodeChordSequenceFromChroma(
     1.45;
 
 
-  /*
-    DP[t] possui os caminhos possíveis
-    até o frame t.
-  */
-
   const dp = [];
 
 
@@ -1491,17 +1685,13 @@ export function decodeChordSequenceFromChroma(
       );
 
 
-  /*
-    Estado N = nenhuma harmonia confiável.
-  */
-
   firstStates.push({
 
     chord:"N",
 
     candidate:null,
 
-    score:0.05,
+    score:0.04,
 
     previous:null
 
@@ -1514,7 +1704,7 @@ export function decodeChordSequenceFromChroma(
 
 
   /* =====================================
-     DEMAIS FRAMES
+     RESTANTE
   ===================================== */
 
   for(
@@ -1523,16 +1713,11 @@ export function decodeChordSequenceFromChroma(
     t++
   ){
 
-    const currentCandidates =
+    const candidates =
       [
-        ...validFrames[t]
-          .candidates
+        ...validFrames[t].candidates,
+        null
       ];
-
-
-    currentCandidates.push(
-      null
-    );
 
 
     const states = [];
@@ -1540,7 +1725,7 @@ export function decodeChordSequenceFromChroma(
 
     for(
       const candidate
-      of currentCandidates
+      of candidates
     ){
 
       const chord =
@@ -1558,7 +1743,7 @@ export function decodeChordSequenceFromChroma(
         *
         emissionWeight
         :
-        0.04;
+        0.035;
 
 
       let bestPreviousIndex =
@@ -1570,7 +1755,9 @@ export function decodeChordSequenceFromChroma(
 
 
       const previousStates =
-        dp[t - 1];
+        dp[
+          t - 1
+        ];
 
 
       for(
@@ -1583,13 +1770,11 @@ export function decodeChordSequenceFromChroma(
           previousStates[p];
 
 
-        let transition =
-          0;
+        let transition = 0;
 
 
         if(
-          previous.chord ===
-          chord
+          previous.chord === chord
         ){
 
           transition +=
@@ -1603,12 +1788,6 @@ export function decodeChordSequenceFromChroma(
             changePenalty;
 
 
-          /*
-            Entrar/sair de N custa menos
-            que trocar diretamente de um
-            acorde real para outro.
-          */
-
           if(
             previous.chord === "N"
             ||
@@ -1616,40 +1795,27 @@ export function decodeChordSequenceFromChroma(
           ){
 
             transition +=
-              changePenalty * 0.35;
+              changePenalty
+              *
+              0.35;
 
           }
 
         }
 
 
-        /*
-          Trocar para acorde complexo exige
-          ligeiramente mais evidência.
-        */
-
         if(
           candidate
           &&
-          [
-            "9",
-            "MAJ9",
-            "MIN9",
-            "ADD9",
-            "MINADD9",
-            "7B9",
-            "7#9",
-            "MAJ7#11"
-          ].includes(
+          isExtendedQuality(
             candidate.quality
           )
           &&
-          previous.chord !==
-          chord
+          previous.chord !== chord
         ){
 
           transition -=
-            0.045;
+            0.035;
 
         }
 
@@ -1805,7 +1971,7 @@ export function decodeChordSequenceFromChroma(
 
 
 /* =========================================
-   DECODIFICADO -> TIMELINE
+   SEQUÊNCIA -> TIMELINE
 ========================================= */
 
 export function decodedSequenceToTimeline(
@@ -1852,8 +2018,7 @@ export function decodedSequenceToTimeline(
       diff > 0
     ){
 
-      defaultStep =
-        diff;
+      defaultStep = diff;
 
     }
 
@@ -1874,7 +2039,9 @@ export function decodedSequenceToTimeline(
 
 
     const next =
-      sequence[i + 1];
+      sequence[
+        i + 1
+      ];
 
 
     const start =
@@ -1982,7 +2149,7 @@ export function decodedSequenceToTimeline(
 
 
 /* =========================================
-   PIPELINE TEMPORAL COMPLETO
+   PIPELINE CHROMA
 ========================================= */
 
 export function detectChordTimelineFromChroma(
@@ -2005,7 +2172,7 @@ export function detectChordTimelineFromChroma(
 
 
 /* =========================================
-   TIMELINE ANTIGA POR NOTAS
+   TIMELINE POR NOTAS
 ========================================= */
 
 export function detectChordTimeline(
@@ -2080,9 +2247,6 @@ export function detectChordTimeline(
 
 /* =========================================
    ESTABILIZADOR FINAL
-
-   Continua existindo como uma limpeza
-   posterior ao decoder temporal.
 ========================================= */
 
 export function stabilizeChordTimeline(
@@ -2115,17 +2279,13 @@ export function stabilizeChordTimeline(
     0.45;
 
 
-  let segments =
+  const segments =
     timeline.map(
       item => ({
         ...item
       })
     );
 
-
-  /*
-    Corrige segmentos muito curtos.
-  */
 
   for(
     let i = 0;
@@ -2156,7 +2316,9 @@ export function stabilizeChordTimeline(
     const previous =
       i > 0
       ?
-      segments[i - 1]
+      segments[
+        i - 1
+      ]
       :
       null;
 
@@ -2165,7 +2327,9 @@ export function stabilizeChordTimeline(
       i <
       segments.length - 1
       ?
-      segments[i + 1]
+      segments[
+        i + 1
+      ]
       :
       null;
 
@@ -2229,10 +2393,6 @@ export function stabilizeChordTimeline(
 
   }
 
-
-  /*
-    Merge final.
-  */
 
   const merged = [];
 
@@ -2302,8 +2462,13 @@ export function normalizeTimeline(
           );
 
 
-        if(!chord.valid)
+        if(
+          !chord.valid
+        ){
+
           return null;
+
+        }
 
 
         return {
@@ -2367,14 +2532,18 @@ export function getChordAtTime(
     Number(time);
 
 
-  return timeline.find(
-    item =>
-      seconds >= item.start
-      &&
-      seconds < item.end
-  )
-  ||
-  null;
+  return (
+    timeline.find(
+      item =>
+        seconds >=
+        item.start
+        &&
+        seconds <
+        item.end
+    )
+    ||
+    null
+  );
 
 }
 
