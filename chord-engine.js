@@ -1,5 +1,15 @@
 /* =========================================
-   CHORD AI — CHORD ENGINE v3
+   CHORD AI — CHORD ENGINE v4
+
+   Chroma
+      ↓
+   candidatos por frame
+      ↓
+   score harmônico
+      ↓
+   decoder temporal
+      ↓
+   timeline estável
 ========================================= */
 
 
@@ -8,18 +18,8 @@
 ========================================= */
 
 const NOTES = [
-  "C",
-  "C#",
-  "D",
-  "D#",
-  "E",
-  "F",
-  "F#",
-  "G",
-  "G#",
-  "A",
-  "A#",
-  "B"
+  "C","C#","D","D#","E","F",
+  "F#","G","G#","A","A#","B"
 ];
 
 
@@ -29,17 +29,17 @@ const NOTES = [
 
 const ENHARMONIC = {
 
-  "DB": "C#",
-  "EB": "D#",
-  "GB": "F#",
-  "AB": "G#",
-  "BB": "A#",
+  "DB":"C#",
+  "EB":"D#",
+  "GB":"F#",
+  "AB":"G#",
+  "BB":"A#",
 
-  "CB": "B",
-  "FB": "E",
+  "CB":"B",
+  "FB":"E",
 
-  "E#": "F",
-  "B#": "C"
+  "E#":"F",
+  "B#":"C"
 
 };
 
@@ -50,53 +50,77 @@ const ENHARMONIC = {
 
 const CHORD_TYPES = {
 
-  "": [0,4,7],
+  "":
+    [0,4,7],
 
-  "MIN": [0,3,7],
+  "MIN":
+    [0,3,7],
 
-  "7": [0,4,7,10],
+  "7":
+    [0,4,7,10],
 
-  "MIN7": [0,3,7,10],
+  "MIN7":
+    [0,3,7,10],
 
-  "MAJ7": [0,4,7,11],
+  "MAJ7":
+    [0,4,7,11],
 
-  "6": [0,4,7,9],
+  "6":
+    [0,4,7,9],
 
-  "MIN6": [0,3,7,9],
+  "MIN6":
+    [0,3,7,9],
 
-  "9": [0,4,7,10,14],
+  "9":
+    [0,4,7,10,14],
 
-  "MAJ9": [0,4,7,11,14],
+  "MAJ9":
+    [0,4,7,11,14],
 
-  "MIN9": [0,3,7,10,14],
+  "MIN9":
+    [0,3,7,10,14],
 
-  "SUS2": [0,2,7],
+  "SUS2":
+    [0,2,7],
 
-  "SUS4": [0,5,7],
+  "SUS4":
+    [0,5,7],
 
-  "DIM": [0,3,6],
+  "DIM":
+    [0,3,6],
 
-  "DIM7": [0,3,6,9],
+  "DIM7":
+    [0,3,6,9],
 
-  "MIN7B5": [0,3,6,10],
+  "MIN7B5":
+    [0,3,6,10],
 
-  "AUG": [0,4,8],
+  "AUG":
+    [0,4,8],
 
-  "ADD9": [0,4,7,14],
+  "ADD9":
+    [0,4,7,14],
 
-  "MINADD9": [0,3,7,14],
+  "MINADD9":
+    [0,3,7,14],
 
-  "7SUS4": [0,5,7,10],
+  "7SUS4":
+    [0,5,7,10],
 
-  "7B5": [0,4,6,10],
+  "7B5":
+    [0,4,6,10],
 
-  "7#5": [0,4,8,10],
+  "7#5":
+    [0,4,8,10],
 
-  "7B9": [0,4,7,10,13],
+  "7B9":
+    [0,4,7,10,13],
 
-  "7#9": [0,4,7,10,15],
+  "7#9":
+    [0,4,7,10,15],
 
-  "MAJ7#11": [0,4,7,11,18]
+  "MAJ7#11":
+    [0,4,7,11,18]
 
 };
 
@@ -165,13 +189,13 @@ function noteIndex(
     );
 
 
-  if(!normalized)
-    return -1;
-
-
-  return NOTES.indexOf(
-    normalized
-  );
+  return normalized
+    ?
+    NOTES.indexOf(
+      normalized
+    )
+    :
+    -1;
 
 }
 
@@ -201,13 +225,11 @@ function normalizeChroma(
           const n =
             Number(value);
 
-          return (
-            Number.isFinite(n)
+          return Number.isFinite(n)
             ?
             Math.max(0,n)
             :
-            0
-          );
+            0;
 
         }
       );
@@ -238,7 +260,7 @@ function normalizeChroma(
 
 
 /* =========================================
-   QUALIDADE -> SÍMBOLO
+   QUALIDADE -> TEXTO
 ========================================= */
 
 function qualityToSymbol(
@@ -322,11 +344,9 @@ function qualityToSymbol(
   };
 
 
-  return (
-    map[quality]
+  return map[quality]
     ??
-    quality.toLowerCase()
-  );
+    quality.toLowerCase();
 
 }
 
@@ -352,11 +372,7 @@ function normalizeQuality(
 
   let value =
     String(quality)
-      .trim();
-
-
-  value =
-    value
+      .trim()
       .replace(/major/gi,"maj")
       .replace(/minor/gi,"min")
       .replace(/Δ/g,"maj")
@@ -398,7 +414,7 @@ function normalizeQuality(
 
 
 /* =========================================
-   PARSE DE ACORDE
+   PARSE DO SÍMBOLO
 ========================================= */
 
 function parseChordSymbol(
@@ -424,18 +440,16 @@ function parseChordSymbol(
     return null;
 
 
-  const slashParts =
+  const slash =
     value.split("/");
 
 
   const chordPart =
-    slashParts[0];
+    slash[0];
 
 
   const bassPart =
-    slashParts[1]
-    ||
-    null;
+    slash[1] || null;
 
 
   const match =
@@ -462,32 +476,23 @@ function parseChordSymbol(
     return null;
 
 
-  const quality =
-    normalizeQuality(
-      match[3] || ""
-    );
-
-
-  const bass =
-    bassPart
-    ?
-    normalizeNote(
-      bassPart
-    )
-    :
-    null;
-
-
   return {
-
-    original:
-      symbol,
 
     root,
 
-    quality,
+    quality:
+      normalizeQuality(
+        match[3] || ""
+      ),
 
-    bass
+    bass:
+      bassPart
+      ?
+      normalizeNote(
+        bassPart
+      )
+      :
+      null
 
   };
 
@@ -504,9 +509,7 @@ export function transposeNote(
 ){
 
   const index =
-    noteIndex(
-      note
-    );
+    noteIndex(note);
 
 
   if(index < 0)
@@ -617,18 +620,17 @@ export function analyzeChord(
     parsed.bass
   ){
 
-    voicing =
-      [
+    voicing = [
 
-        parsed.bass,
+      parsed.bass,
 
-        ...notes.filter(
-          note =>
-            note !==
-            parsed.bass
-        )
+      ...notes.filter(
+        note =>
+          note !==
+          parsed.bass
+      )
 
-      ];
+    ];
 
   }
 
@@ -681,15 +683,11 @@ export function transposeChord(
     return null;
 
 
-  const newRoot =
+  let result =
     transposeNote(
       parsed.root,
       semitones
-    );
-
-
-  let result =
-    newRoot
+    )
     +
     qualityToSymbol(
       parsed.quality
@@ -700,17 +698,13 @@ export function transposeChord(
     parsed.bass
   ){
 
-    const newBass =
+    result +=
+      "/"
+      +
       transposeNote(
         parsed.bass,
         semitones
       );
-
-
-    result +=
-      "/"
-      +
-      newBass;
 
   }
 
@@ -724,43 +718,559 @@ export function transposeChord(
    COMPLEXIDADE
 ========================================= */
 
+function getPitchClasses(
+  intervals
+){
+
+  return [
+    ...new Set(
+      intervals.map(
+        value =>
+          value % 12
+      )
+    )
+  ];
+
+}
+
+
 function complexityPenalty(
+  quality,
   intervals
 ){
 
   const size =
-    [
-      ...new Set(
-        intervals.map(
-          value =>
-            value % 12
-        )
-      )
-    ].length;
+    getPitchClasses(
+      intervals
+    ).length;
+
+
+  let penalty = 0;
 
 
   if(
-    size <= 3
+    size > 3
   ){
 
-    return 0;
+    penalty +=
+      (
+        size - 3
+      )
+      *
+      0.035;
 
   }
 
 
-  return (
-    size - 3
-  )
-  *
-  0.025;
+  /*
+    Extensões recebem uma pequena
+    penalidade adicional.
+
+    Elas ainda podem vencer,
+    mas precisam de evidência real.
+  */
+
+  if(
+    [
+      "9",
+      "MAJ9",
+      "MIN9",
+      "ADD9",
+      "MINADD9",
+      "7B9",
+      "7#9",
+      "MAJ7#11"
+    ].includes(
+      quality
+    )
+  ){
+
+    penalty +=
+      0.045;
+
+  }
+
+
+  return penalty;
 
 }
 
 
 /* =========================================
-   DETECTOR ANTIGO POR NOTAS
+   SCORE DE UM ACORDE CONTRA CHROMA
+========================================= */
 
-   Mantido por compatibilidade.
+function scoreChordTemplate(
+  chroma,
+  rootIndex,
+  quality,
+  intervals
+){
+
+  const relative =
+    getPitchClasses(
+      intervals
+    );
+
+
+  const pitches =
+    relative.map(
+      interval =>
+        (
+          rootIndex
+          +
+          interval
+        ) % 12
+    );
+
+
+  const set =
+    new Set(
+      pitches
+    );
+
+
+  let insideEnergy = 0;
+
+  let outsideEnergy = 0;
+
+
+  for(
+    let i = 0;
+    i < 12;
+    i++
+  ){
+
+    if(
+      set.has(i)
+    ){
+
+      insideEnergy +=
+        chroma[i];
+
+    }
+
+    else{
+
+      outsideEnergy +=
+        chroma[i];
+
+    }
+
+  }
+
+
+  const structural =
+    pitches.map(
+      pitch =>
+        chroma[pitch]
+    );
+
+
+  const averageInside =
+    structural.reduce(
+      (sum,value) =>
+        sum + value,
+      0
+    )
+    /
+    structural.length;
+
+
+  const explained =
+    insideEnergy
+    /
+    (
+      insideEnergy
+      +
+      outsideEnergy
+      +
+      1e-9
+    );
+
+
+  const rootEnergy =
+    chroma[
+      rootIndex
+    ];
+
+
+  let score =
+    averageInside * 0.54
+    +
+    explained * 0.38
+    +
+    rootEnergy * 0.08;
+
+
+  /*
+    Energia externa forte
+    diminui a confiança.
+  */
+
+  score -=
+    (
+      outsideEnergy / 12
+    )
+    *
+    0.14;
+
+
+  /*
+    Notas estruturais praticamente
+    ausentes diminuem o score.
+  */
+
+  const weakNotes =
+    structural.filter(
+      energy =>
+        energy < 0.20
+    ).length;
+
+
+  score -=
+    weakNotes
+    *
+    0.075;
+
+
+  /*
+    Extensões precisam realmente existir.
+
+    Exemplo:
+    Am deve vencer Fmaj7 se a nota F
+    tiver energia muito pequena.
+  */
+
+  if(
+    pitches.length > 3
+  ){
+
+    const extensionPitches =
+      pitches.slice(3);
+
+
+    const extensionEnergy =
+      extensionPitches.reduce(
+        (sum,pitch) =>
+          sum
+          +
+          chroma[pitch],
+        0
+      )
+      /
+      extensionPitches.length;
+
+
+    if(
+      extensionEnergy < 0.30
+    ){
+
+      score -=
+        (
+          0.30
+          -
+          extensionEnergy
+        )
+        *
+        0.35;
+
+    }
+
+  }
+
+
+  score -=
+    complexityPenalty(
+      quality,
+      intervals
+    );
+
+
+  return {
+
+    score,
+
+    insideEnergy,
+
+    outsideEnergy,
+
+    explained,
+
+    rootEnergy,
+
+    pitches
+
+  };
+
+}
+
+
+/* =========================================
+   CANDIDATOS POR CHROMA
+========================================= */
+
+export function detectChordCandidatesFromChroma(
+  chroma,
+  options = {}
+){
+
+  const normalized =
+    normalizeChroma(
+      chroma
+    );
+
+
+  if(!normalized){
+
+    return [];
+
+  }
+
+
+  const total =
+    normalized.reduce(
+      (sum,value) =>
+        sum + value,
+      0
+    );
+
+
+  if(
+    total <= 0.001
+  ){
+
+    return [];
+
+  }
+
+
+  const candidates = [];
+
+
+  for(
+    let rootIndex = 0;
+    rootIndex < 12;
+    rootIndex++
+  ){
+
+    for(
+      const [
+        quality,
+        intervals
+      ]
+      of
+      Object.entries(
+        CHORD_TYPES
+      )
+    ){
+
+      const result =
+        scoreChordTemplate(
+          normalized,
+          rootIndex,
+          quality,
+          intervals
+        );
+
+
+      candidates.push({
+
+        chord:
+          NOTES[rootIndex]
+          +
+          qualityToSymbol(
+            quality
+          ),
+
+        root:
+          NOTES[rootIndex],
+
+        rootIndex,
+
+        quality,
+
+        notes:
+          result.pitches.map(
+            pitch =>
+              NOTES[pitch]
+          ),
+
+        score:
+          result.score,
+
+        explainedRatio:
+          result.explained,
+
+        rootEnergy:
+          result.rootEnergy
+
+      });
+
+    }
+
+  }
+
+
+  candidates.sort(
+    (a,b) =>
+      b.score
+      -
+      a.score
+  );
+
+
+  const limit =
+    Number.isFinite(
+      Number(
+        options.limit
+      )
+    )
+    ?
+    Math.max(
+      1,
+      Math.floor(
+        Number(
+          options.limit
+        )
+      )
+    )
+    :
+    8;
+
+
+  return candidates
+    .slice(
+      0,
+      limit
+    )
+    .map(
+      candidate => ({
+
+        ...candidate,
+
+        confidence:
+          clamp(
+            Number(
+              candidate.score
+                .toFixed(3)
+            ),
+            0,
+            1
+          )
+
+      })
+    );
+
+}
+
+
+/* =========================================
+   DETECTAR MELHOR ACORDE
+========================================= */
+
+export function detectChordFromChroma(
+  chroma,
+  options = {}
+){
+
+  const candidates =
+    detectChordCandidatesFromChroma(
+      chroma,
+      {
+        limit:5
+      }
+    );
+
+
+  if(
+    candidates.length === 0
+  ){
+
+    return {
+
+      valid:false,
+
+      error:
+        "Sem energia harmônica"
+
+    };
+
+  }
+
+
+  const best =
+    candidates[0];
+
+
+  const minScore =
+    Number.isFinite(
+      Number(
+        options.minScore
+      )
+    )
+    ?
+    Number(
+      options.minScore
+    )
+    :
+    0.34;
+
+
+  if(
+    best.score <
+    minScore
+  ){
+
+    return {
+
+      valid:false,
+
+      error:
+        "Nenhum acorde confiável",
+
+      candidates
+
+    };
+
+  }
+
+
+  return {
+
+    valid:true,
+
+    chord:
+      best.chord,
+
+    root:
+      best.root,
+
+    quality:
+      best.quality,
+
+    bass:
+      null,
+
+    confidence:
+      best.confidence,
+
+    expectedNotes:
+      best.notes,
+
+    alternatives:
+      candidates
+        .slice(
+          1
+        )
+
+  };
+
+}
+
+
+/* =========================================
+   DETECTOR POR NOTAS
 ========================================= */
 
 export function detectChord(
@@ -768,9 +1278,7 @@ export function detectChord(
 ){
 
   if(
-    !Array.isArray(
-      inputNotes
-    )
+    !Array.isArray(inputNotes)
     ||
     inputNotes.length < 2
   ){
@@ -798,9 +1306,7 @@ export function detectChord(
   ){
 
     const index =
-      noteIndex(
-        note
-      );
+      noteIndex(note);
 
 
     if(
@@ -823,263 +1329,645 @@ export function detectChord(
 
 
 /* =========================================
-   NOVO DETECTOR POR CHROMA
+   DECODER TEMPORAL — V4
+
+   Dynamic Programming / Viterbi simplificado.
+
+   Ao invés de escolher isoladamente:
+
+   F
+   F
+   A#madd9
+   F
+
+   ele considera o custo de abandonar F
+   e voltar imediatamente para F.
 ========================================= */
 
-export function detectChordFromChroma(
-  chroma,
+export function decodeChordSequenceFromChroma(
+  frames,
   options = {}
 ){
 
-  const normalized =
-    normalizeChroma(
-      chroma
-    );
+  if(
+    !Array.isArray(frames)
+    ||
+    frames.length === 0
+  ){
 
-
-  if(!normalized){
-
-    return {
-
-      valid:false,
-
-      error:
-        "Chroma inválido"
-
-    };
+    return [];
 
   }
 
 
-  const totalEnergy =
-    normalized.reduce(
-      (sum,value) =>
-        sum + value,
-      0
-    );
+  const validFrames =
+    frames
+      .map(
+        frame => {
+
+          const time =
+            Number(
+              frame.time
+            );
+
+
+          if(
+            !Number.isFinite(time)
+          ){
+
+            return null;
+
+          }
+
+
+          const candidates =
+            detectChordCandidatesFromChroma(
+              frame.chroma,
+              {
+                limit:
+                  options.candidateLimit
+                  ??
+                  6
+              }
+            );
+
+
+          return {
+
+            time,
+
+            candidates
+
+          };
+
+        }
+      )
+      .filter(Boolean);
 
 
   if(
-    totalEnergy <= 0.001
+    validFrames.length === 0
   ){
 
-    return {
-
-      valid:false,
-
-      error:
-        "Sem energia harmônica"
-
-    };
+    return [];
 
   }
 
 
-  const candidates = [];
+  const changePenalty =
+    Number.isFinite(
+      Number(
+        options.changePenalty
+      )
+    )
+    ?
+    Number(
+      options.changePenalty
+    )
+    :
+    0.18;
 
+
+  const stayBonus =
+    Number.isFinite(
+      Number(
+        options.stayBonus
+      )
+    )
+    ?
+    Number(
+      options.stayBonus
+    )
+    :
+    0.055;
+
+
+  const emissionWeight =
+    Number.isFinite(
+      Number(
+        options.emissionWeight
+      )
+    )
+    ?
+    Number(
+      options.emissionWeight
+    )
+    :
+    1.45;
+
+
+  /*
+    DP[t] possui os caminhos possíveis
+    até o frame t.
+  */
+
+  const dp = [];
+
+
+  /* =====================================
+     PRIMEIRO FRAME
+  ===================================== */
+
+  const firstStates =
+    validFrames[0]
+      .candidates
+      .map(
+        candidate => ({
+
+          chord:
+            candidate.chord,
+
+          candidate,
+
+          score:
+            candidate.score
+            *
+            emissionWeight,
+
+          previous:
+            null
+
+        })
+      );
+
+
+  /*
+    Estado N = nenhuma harmonia confiável.
+  */
+
+  firstStates.push({
+
+    chord:"N",
+
+    candidate:null,
+
+    score:0.05,
+
+    previous:null
+
+  });
+
+
+  dp.push(
+    firstStates
+  );
+
+
+  /* =====================================
+     DEMAIS FRAMES
+  ===================================== */
 
   for(
-    let rootIndex = 0;
-    rootIndex < 12;
-    rootIndex++
+    let t = 1;
+    t < validFrames.length;
+    t++
   ){
 
+    const currentCandidates =
+      [
+        ...validFrames[t]
+          .candidates
+      ];
+
+
+    currentCandidates.push(
+      null
+    );
+
+
+    const states = [];
+
+
     for(
-      const [
-        quality,
-        intervals
-      ]
-      of
-      Object.entries(
-        CHORD_TYPES
-      )
+      const candidate
+      of currentCandidates
     ){
 
-      const chordPitches =
-        [
-          ...new Set(
-            intervals.map(
-              interval =>
-                (
-                  rootIndex
-                  +
-                  interval
-                ) % 12
-            )
-          )
-        ];
+      const chord =
+        candidate
+        ?
+        candidate.chord
+        :
+        "N";
 
 
-      const chordSet =
-        new Set(
-          chordPitches
-        );
+      const emission =
+        candidate
+        ?
+        candidate.score
+        *
+        emissionWeight
+        :
+        0.04;
 
 
-      let insideEnergy = 0;
+      let bestPreviousIndex =
+        -1;
 
-      let outsideEnergy = 0;
+
+      let bestScore =
+        -Infinity;
+
+
+      const previousStates =
+        dp[t - 1];
 
 
       for(
-        let pitch = 0;
-        pitch < 12;
-        pitch++
+        let p = 0;
+        p < previousStates.length;
+        p++
       ){
 
+        const previous =
+          previousStates[p];
+
+
+        let transition =
+          0;
+
+
         if(
-          chordSet.has(
-            pitch
-          )
+          previous.chord ===
+          chord
         ){
 
-          insideEnergy +=
-            normalized[pitch];
+          transition +=
+            stayBonus;
 
         }
 
         else{
 
-          outsideEnergy +=
-            normalized[pitch];
+          transition -=
+            changePenalty;
+
+
+          /*
+            Entrar/sair de N custa menos
+            que trocar diretamente de um
+            acorde real para outro.
+          */
+
+          if(
+            previous.chord === "N"
+            ||
+            chord === "N"
+          ){
+
+            transition +=
+              changePenalty * 0.35;
+
+          }
+
+        }
+
+
+        /*
+          Trocar para acorde complexo exige
+          ligeiramente mais evidência.
+        */
+
+        if(
+          candidate
+          &&
+          [
+            "9",
+            "MAJ9",
+            "MIN9",
+            "ADD9",
+            "MINADD9",
+            "7B9",
+            "7#9",
+            "MAJ7#11"
+          ].includes(
+            candidate.quality
+          )
+          &&
+          previous.chord !==
+          chord
+        ){
+
+          transition -=
+            0.045;
+
+        }
+
+
+        const total =
+          previous.score
+          +
+          emission
+          +
+          transition;
+
+
+        if(
+          total >
+          bestScore
+        ){
+
+          bestScore =
+            total;
+
+          bestPreviousIndex =
+            p;
 
         }
 
       }
 
 
-      const expectedEnergy =
-        chordPitches.reduce(
-          (sum,pitch) =>
-            sum
+      states.push({
+
+        chord,
+
+        candidate,
+
+        score:
+          bestScore,
+
+        previous:
+          bestPreviousIndex
+
+      });
+
+    }
+
+
+    dp.push(
+      states
+    );
+
+  }
+
+
+  /* =====================================
+     BACKTRACK
+  ===================================== */
+
+  const lastStates =
+    dp[
+      dp.length - 1
+    ];
+
+
+  let bestLastIndex = 0;
+
+
+  for(
+    let i = 1;
+    i < lastStates.length;
+    i++
+  ){
+
+    if(
+      lastStates[i].score >
+      lastStates[
+        bestLastIndex
+      ].score
+    ){
+
+      bestLastIndex =
+        i;
+
+    }
+
+  }
+
+
+  const decoded =
+    new Array(
+      validFrames.length
+    );
+
+
+  let stateIndex =
+    bestLastIndex;
+
+
+  for(
+    let t =
+      validFrames.length - 1;
+    t >= 0;
+    t--
+  ){
+
+    const state =
+      dp[t][stateIndex];
+
+
+    decoded[t] = {
+
+      time:
+        validFrames[t].time,
+
+      chord:
+        state.chord,
+
+      confidence:
+        state.candidate
+        ?
+        state.candidate.confidence
+        :
+        0,
+
+      notes:
+        state.candidate
+        ?
+        state.candidate.notes
+        :
+        []
+
+    };
+
+
+    stateIndex =
+      state.previous;
+
+
+    if(
+      stateIndex == null
+      ||
+      stateIndex < 0
+    ){
+
+      stateIndex = 0;
+
+    }
+
+  }
+
+
+  return decoded;
+
+}
+
+
+/* =========================================
+   DECODIFICADO -> TIMELINE
+========================================= */
+
+export function decodedSequenceToTimeline(
+  sequence,
+  options = {}
+){
+
+  if(
+    !Array.isArray(sequence)
+    ||
+    sequence.length === 0
+  ){
+
+    return [];
+
+  }
+
+
+  let defaultStep =
+    Number.isFinite(
+      Number(
+        options.defaultStep
+      )
+    )
+    ?
+    Number(
+      options.defaultStep
+    )
+    :
+    0.20;
+
+
+  if(
+    sequence.length >= 2
+  ){
+
+    const diff =
+      sequence[1].time
+      -
+      sequence[0].time;
+
+
+    if(
+      diff > 0
+    ){
+
+      defaultStep =
+        diff;
+
+    }
+
+  }
+
+
+  const timeline = [];
+
+
+  for(
+    let i = 0;
+    i < sequence.length;
+    i++
+  ){
+
+    const current =
+      sequence[i];
+
+
+    const next =
+      sequence[i + 1];
+
+
+    const start =
+      current.time;
+
+
+    const end =
+      next
+      ?
+      next.time
+      :
+      start
+      +
+      defaultStep;
+
+
+    const previous =
+      timeline[
+        timeline.length - 1
+      ];
+
+
+    if(
+      previous
+      &&
+      previous.chord ===
+      current.chord
+    ){
+
+      const oldDuration =
+        previous.end
+        -
+        previous.start;
+
+
+      const newDuration =
+        end
+        -
+        start;
+
+
+      const total =
+        oldDuration
+        +
+        newDuration;
+
+
+      previous.confidence =
+        total > 0
+        ?
+        Number(
+          (
+            (
+              previous.confidence
+              *
+              oldDuration
+            )
             +
-            normalized[pitch],
-          0
-        );
+            (
+              current.confidence
+              *
+              newDuration
+            )
+          )
+          /
+          total
+        )
+        .toFixed(3)
+        :
+        previous.confidence;
 
 
-      const averageInside =
-        expectedEnergy
-        /
-        chordPitches.length;
+      previous.end =
+        end;
 
+    }
 
-      const rootEnergy =
-        normalized[
-          rootIndex
-        ];
+    else{
 
+      timeline.push({
 
-      /*
-        Energia das notas estruturais.
-      */
+        start,
 
-      let score =
-        averageInside
-        *
-        0.58;
+        end,
 
+        chord:
+          current.chord,
 
-      /*
-        Proporção de energia do chroma
-        explicada pelo acorde.
-      */
+        notes:
+          current.notes,
 
-      const explainedRatio =
-        insideEnergy
-        /
-        (
-          insideEnergy
-          +
-          outsideEnergy
-          +
-          1e-9
-        );
-
-
-      score +=
-        explainedRatio
-        *
-        0.36;
-
-
-      /*
-        Pequeno bônus para fundamental
-        presente com energia real.
-      */
-
-      score +=
-        rootEnergy
-        *
-        0.06;
-
-
-      /*
-        Penaliza energia fora do acorde.
-      */
-
-      score -=
-        outsideEnergy
-        /
-        12
-        *
-        0.12;
-
-
-      /*
-        Penaliza acordes complexos
-        quando a evidência não exige.
-      */
-
-      score -=
-        complexityPenalty(
-          intervals
-        );
-
-
-      /*
-        Penaliza acordes onde alguma nota
-        estrutural praticamente não existe.
-      */
-
-      const structuralEnergies =
-        chordPitches.map(
-          pitch =>
-            normalized[pitch]
-        );
-
-
-      const weakStructuralNotes =
-        structuralEnergies.filter(
-          energy =>
-            energy < 0.22
-        ).length;
-
-
-      score -=
-        weakStructuralNotes
-        *
-        0.08;
-
-
-      candidates.push({
-
-        root:
-          NOTES[rootIndex],
-
-        quality,
-
-        chordPitches,
-
-        score,
-
-        explainedRatio,
-
-        rootEnergy,
-
-        insideEnergy,
-
-        outsideEnergy
+        confidence:
+          current.confidence
 
       });
 
@@ -1088,163 +1976,36 @@ export function detectChordFromChroma(
   }
 
 
-  candidates.sort(
-    (a,b) =>
-      b.score
-      -
-      a.score
-  );
-
-
-  const best =
-    candidates[0];
-
-
-  if(
-    !best
-    ||
-    best.score <
-    (
-      Number.isFinite(
-        Number(
-          options.minScore
-        )
-      )
-      ?
-      Number(
-        options.minScore
-      )
-      :
-      0.38
-    )
-  ){
-
-    return {
-
-      valid:false,
-
-      error:
-        "Nenhum acorde confiável"
-
-    };
-
-  }
-
-
-  const chord =
-    best.root
-    +
-    qualityToSymbol(
-      best.quality
-    );
-
-
-  const expectedNotes =
-    best.chordPitches.map(
-      pitch =>
-        NOTES[pitch]
-    );
-
-
-  const confidence =
-    clamp(
-      Number(
-        best.score
-          .toFixed(3)
-      ),
-      0,
-      1
-    );
-
-
-  return {
-
-    valid:true,
-
-    chord,
-
-    root:
-      best.root,
-
-    quality:
-      best.quality,
-
-    bass:
-      null,
-
-    confidence,
-
-    expectedNotes,
-
-    chroma:
-      normalized,
-
-    scoreDetails:{
-
-      explainedRatio:
-        Number(
-          best.explainedRatio
-            .toFixed(3)
-        ),
-
-      rootEnergy:
-        Number(
-          best.rootEnergy
-            .toFixed(3)
-        ),
-
-      insideEnergy:
-        Number(
-          best.insideEnergy
-            .toFixed(3)
-        ),
-
-      outsideEnergy:
-        Number(
-          best.outsideEnergy
-            .toFixed(3)
-        )
-
-    },
-
-    alternatives:
-      candidates
-        .slice(
-          1,
-          5
-        )
-        .map(
-          item => ({
-
-            chord:
-              item.root
-              +
-              qualityToSymbol(
-                item.quality
-              ),
-
-            confidence:
-              clamp(
-                Number(
-                  item.score
-                    .toFixed(3)
-                ),
-                0,
-                1
-              )
-
-          })
-        )
-
-  };
+  return timeline;
 
 }
 
 
 /* =========================================
-   TIMELINE POR NOTAS
+   PIPELINE TEMPORAL COMPLETO
+========================================= */
 
-   Compatibilidade antiga.
+export function detectChordTimelineFromChroma(
+  frames,
+  options = {}
+){
+
+  const decoded =
+    decodeChordSequenceFromChroma(
+      frames,
+      options
+    );
+
+
+  return decodedSequenceToTimeline(
+    decoded
+  );
+
+}
+
+
+/* =========================================
+   TIMELINE ANTIGA POR NOTAS
 ========================================= */
 
 export function detectChordTimeline(
@@ -1252,11 +2013,7 @@ export function detectChordTimeline(
 ){
 
   if(
-    !Array.isArray(
-      frames
-    )
-    ||
-    frames.length === 0
+    !Array.isArray(frames)
   ){
 
     return [];
@@ -1285,17 +2042,14 @@ export function detectChordTimeline(
           ){
 
             const index =
-              noteIndex(
-                note
-              );
+              noteIndex(note);
 
 
             if(
               index >= 0
             ){
 
-              chroma[index] =
-                1;
+              chroma[index] = 1;
 
             }
 
@@ -1325,261 +2079,10 @@ export function detectChordTimeline(
 
 
 /* =========================================
-   NOVA TIMELINE POR CHROMA
-========================================= */
+   ESTABILIZADOR FINAL
 
-export function detectChordTimelineFromChroma(
-  frames
-){
-
-  if(
-    !Array.isArray(
-      frames
-    )
-    ||
-    frames.length === 0
-  ){
-
-    return [];
-
-  }
-
-
-  const normalizedFrames =
-    frames
-      .map(
-        frame => {
-
-          const time =
-            Number(
-              frame.time
-            );
-
-
-          if(
-            !Number.isFinite(
-              time
-            )
-          ){
-
-            return null;
-
-          }
-
-
-          const detection =
-            detectChordFromChroma(
-              frame.chroma
-            );
-
-
-          return {
-
-            time,
-
-            detection
-
-          };
-
-        }
-      )
-      .filter(Boolean)
-      .sort(
-        (a,b) =>
-          a.time
-          -
-          b.time
-      );
-
-
-  if(
-    normalizedFrames.length === 0
-  ){
-
-    return [];
-
-  }
-
-
-  let step = 0.20;
-
-
-  if(
-    normalizedFrames.length >= 2
-  ){
-
-    const diffs = [];
-
-
-    for(
-      let i = 1;
-      i < normalizedFrames.length;
-      i++
-    ){
-
-      const diff =
-        normalizedFrames[i].time
-        -
-        normalizedFrames[i - 1].time;
-
-
-      if(
-        diff > 0
-      ){
-
-        diffs.push(
-          diff
-        );
-
-      }
-
-    }
-
-
-    if(
-      diffs.length > 0
-    ){
-
-      step =
-        diffs.reduce(
-          (sum,value) =>
-            sum + value,
-          0
-        )
-        /
-        diffs.length;
-
-    }
-
-  }
-
-
-  const raw = [];
-
-
-  for(
-    let i = 0;
-    i < normalizedFrames.length;
-    i++
-  ){
-
-    const current =
-      normalizedFrames[i];
-
-
-    const next =
-      normalizedFrames[
-        i + 1
-      ];
-
-
-    const start =
-      current.time;
-
-
-    const end =
-      next
-      ?
-      next.time
-      :
-      start + step;
-
-
-    const detection =
-      current.detection;
-
-
-    raw.push({
-
-      start,
-
-      end,
-
-      chord:
-        detection.valid
-        ?
-        detection.chord
-        :
-        "N",
-
-      notes:
-        detection.valid
-        ?
-        detection.expectedNotes
-        :
-        [],
-
-      confidence:
-        detection.valid
-        ?
-        detection.confidence
-        :
-        0
-
-    });
-
-  }
-
-
-  const merged = [];
-
-
-  for(
-    const segment
-    of raw
-  ){
-
-    const previous =
-      merged[
-        merged.length - 1
-      ];
-
-
-    if(
-      previous
-      &&
-      previous.chord ===
-      segment.chord
-    ){
-
-      previous.end =
-        segment.end;
-
-
-      previous.confidence =
-        Number(
-          (
-            (
-              previous.confidence
-              +
-              segment.confidence
-            )
-            /
-            2
-          )
-          .toFixed(3)
-        );
-
-    }
-
-    else{
-
-      merged.push({
-        ...segment
-      });
-
-    }
-
-  }
-
-
-  return merged;
-
-}
-
-
-/* =========================================
-   ESTABILIZAR TIMELINE
+   Continua existindo como uma limpeza
+   posterior ao decoder temporal.
 ========================================= */
 
 export function stabilizeChordTimeline(
@@ -1588,9 +2091,7 @@ export function stabilizeChordTimeline(
 ){
 
   if(
-    !Array.isArray(
-      timeline
-    )
+    !Array.isArray(timeline)
     ||
     timeline.length === 0
   ){
@@ -1611,79 +2112,19 @@ export function stabilizeChordTimeline(
       options.minDuration
     )
     :
-    0.55;
-
-
-  const confidenceThreshold =
-    Number.isFinite(
-      Number(
-        options.confidenceThreshold
-      )
-    )
-    ?
-    Number(
-      options.confidenceThreshold
-    )
-    :
-    0.38;
+    0.45;
 
 
   let segments =
-    timeline
-      .map(
-        item => ({
-          ...item
-        })
-      )
-      .filter(
-        item =>
-          Number.isFinite(
-            item.start
-          )
-          &&
-          Number.isFinite(
-            item.end
-          )
-          &&
-          item.end >
-          item.start
-      );
-
-
-  segments =
-    segments.map(
-      segment => {
-
-        if(
-          segment.chord !== "N"
-          &&
-          segment.confidence <
-          confidenceThreshold
-        ){
-
-          return {
-
-            ...segment,
-
-            chord:
-              "N",
-
-            notes:
-              []
-
-          };
-
-        }
-
-
-        return segment;
-
-      }
+    timeline.map(
+      item => ({
+        ...item
+      })
     );
 
 
   /*
-    Microsegmentos.
+    Corrige segmentos muito curtos.
   */
 
   for(
@@ -1761,18 +2202,14 @@ export function stabilizeChordTimeline(
       next
     ){
 
-      const usePrevious =
+      const source =
         (
           previous.confidence || 0
         )
         >=
         (
           next.confidence || 0
-        );
-
-
-      const source =
-        usePrevious
+        )
         ?
         previous
         :
@@ -1790,34 +2227,12 @@ export function stabilizeChordTimeline(
 
     }
 
-    else if(previous){
-
-      current.chord =
-        previous.chord;
-
-      current.notes =
-        previous.notes;
-
-      current.confidence =
-        previous.confidence;
-
-    }
-
-    else if(next){
-
-      current.chord =
-        next.chord;
-
-      current.notes =
-        next.notes;
-
-      current.confidence =
-        next.confidence;
-
-    }
-
   }
 
+
+  /*
+    Merge final.
+  */
 
   const merged = [];
 
@@ -1869,9 +2284,7 @@ export function normalizeTimeline(
 ){
 
   if(
-    !Array.isArray(
-      chords
-    )
+    !Array.isArray(chords)
   ){
 
     return [];
@@ -1889,13 +2302,8 @@ export function normalizeTimeline(
           );
 
 
-        if(
-          !chord.valid
-        ){
-
+        if(!chord.valid)
           return null;
-
-        }
 
 
         return {
@@ -1903,14 +2311,10 @@ export function normalizeTimeline(
           index,
 
           start:
-            Number(
-              item.start
-            ),
+            Number(item.start),
 
           end:
-            Number(
-              item.end
-            ),
+            Number(item.end),
 
           chord:
             item.chord,
@@ -1951,9 +2355,7 @@ export function getChordAtTime(
 ){
 
   if(
-    !Array.isArray(
-      timeline
-    )
+    !Array.isArray(timeline)
   ){
 
     return null;
@@ -1962,23 +2364,17 @@ export function getChordAtTime(
 
 
   const seconds =
-    Number(
-      time
-    );
+    Number(time);
 
 
-  return (
-    timeline.find(
-      item =>
-        seconds >=
-        item.start
-        &&
-        seconds <
-        item.end
-    )
-    ||
-    null
-  );
+  return timeline.find(
+    item =>
+      seconds >= item.start
+      &&
+      seconds < item.end
+  )
+  ||
+  null;
 
 }
 
