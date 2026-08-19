@@ -18,39 +18,60 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+
       - name: Baixar repositório
         uses: actions/checkout@v4
 
-     
+
       - name: Configurar Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
-    
+
+
+      - name: Mostrar versão do Node e npm
+        run: |
+          node --version
+          npm --version
+
+
       - name: Instalar dependências
         run: npm install
 
-      - name: Mostrar arquivos de benchmark
+
+      - name: Conferir arquivos de benchmark
         run: |
-          echo "Conteúdo da pasta benchmarks:"
-          ls -lah benchmarks || true
+          echo "Raiz do projeto:"
+          ls -lah
+
+          echo ""
+          echo "Pasta benchmarks:"
+          ls -lah benchmarks
+
+          echo ""
+          echo "Arquivo cases.json:"
+          cat benchmarks/cases.json
+
 
       - name: Aguardar API do Render
         run: |
-          echo "Acordando Chord AI..."
-          
-          for i in {1..20}; do
+          echo "Verificando Chord AI no Render..."
+
+          for i in {1..30}; do
+
             if curl -fsS https://chord-ai-api.onrender.com/health > /dev/null; then
               echo "API online."
               exit 0
             fi
 
-            echo "Tentativa $i/20..."
+            echo "Tentativa $i/30..."
             sleep 5
+
           done
 
-          echo "A API não respondeu."
+          echo "A API não respondeu dentro do tempo limite."
           exit 1
+
 
       - name: Rodar benchmark normal
         if: ${{ inputs.modo == 'normal' }}
@@ -58,17 +79,48 @@ jobs:
           BENCHMARK_API_URL: https://chord-ai-api.onrender.com
         run: npm run benchmark
 
+
       - name: Rodar benchmark strict
         if: ${{ inputs.modo == 'strict' }}
         env:
           BENCHMARK_API_URL: https://chord-ai-api.onrender.com
         run: npm run benchmark:strict
 
-      - name: Criar nova baseline
+
+      - name: Criar baseline
         if: ${{ inputs.modo == 'salvar-baseline' }}
         env:
           BENCHMARK_API_URL: https://chord-ai-api.onrender.com
         run: npm run benchmark:save
+
+
+      - name: Mostrar último resultado
+        if: always()
+        run: |
+          echo "================================="
+          echo "Último resultado do benchmark"
+          echo "================================="
+
+          if [ -f benchmarks/last-result.json ]; then
+            cat benchmarks/last-result.json
+          else
+            echo "last-result.json não foi criado."
+          fi
+
+
+      - name: Mostrar baseline
+        if: always()
+        run: |
+          echo "================================="
+          echo "Baseline"
+          echo "================================="
+
+          if [ -f benchmarks/baseline.json ]; then
+            cat benchmarks/baseline.json
+          else
+            echo "baseline.json ainda não existe."
+          fi
+
 
       - name: Salvar relatório como artefato
         if: always()
