@@ -3,25 +3,25 @@ import WavDecoder from "wav-decoder";
 
 
 /* =========================================
-   CHORD AI — AUDIO ENGINE v2.1
+   CHORD AI — AUDIO ENGINE v3
 
    WAV
     ↓
    PCM mono
     ↓
-   frames espectrais
-    ↓
-   chroma
-    ↓
-   filtro de silêncio corrigido
-    ↓
-   agregação temporal
-    ↓
-   seleção inteligente de notas
-    ↓
-   Chord Engine
+   frames
+    ├── full chroma
+    └── bass detector
+          ↓
+       bassChroma
+          ↓
+       bassNote
 ========================================= */
 
+
+/* =========================================
+   NOTAS
+========================================= */
 
 const NOTE_NAMES = [
   "C",
@@ -36,6 +36,33 @@ const NOTE_NAMES = [
   "A",
   "A#",
   "B"
+];
+
+
+/* =========================================
+   FREQUÊNCIAS BASE
+
+   C1 → B1 aproximadamente.
+
+   Depois analisamos múltiplas oitavas
+   da mesma pitch class.
+========================================= */
+
+const BASS_BASE_FREQUENCIES = [
+
+  32.7032, // C1
+  34.6478, // C#1
+  36.7081, // D1
+  38.8909, // D#1
+  41.2034, // E1
+  43.6535, // F1
+  46.2493, // F#1
+  48.9994, // G1
+  51.9131, // G#1
+  55.0000, // A1
+  58.2705, // A#1
+  61.7354  // B1
+
 ];
 
 
@@ -106,19 +133,19 @@ function median(values){
 
 
 /* =========================================
-   NORMALIZAR CHROMA
+   NORMALIZAR ARRAY DE 12 VALORES
 ========================================= */
 
-function normalizeChroma(
-  chroma
+function normalize12(
+  values
 ){
 
   if(
-    !chroma
+    !values
     ||
-    typeof chroma.length !== "number"
+    typeof values.length !== "number"
     ||
-    chroma.length !== 12
+    values.length !== 12
   ){
 
     return null;
@@ -126,27 +153,19 @@ function normalizeChroma(
   }
 
 
-  const values =
-    Array.from(chroma)
+  const normalized =
+    Array.from(values)
       .map(
         value => {
 
-          const number =
+          const n =
             Number(value);
 
-          if(
-            !Number.isFinite(number)
-          ){
-
-            return 0;
-
-          }
-
-
-          return Math.max(
-            0,
-            number
-          );
+          return Number.isFinite(n)
+            ?
+            Math.max(0,n)
+            :
+            0;
 
         }
       );
@@ -154,7 +173,7 @@ function normalizeChroma(
 
   const max =
     Math.max(
-      ...values
+      ...normalized
     );
 
 
@@ -168,10 +187,418 @@ function normalizeChroma(
   }
 
 
-  return values.map(
+  return normalized.map(
     value =>
       value / max
   );
+
+}
+
+
+/* =========================================
+   NORMALIZAR CHROMA
+========================================= */
+
+function normalizeChroma(
+  chroma
+){
+
+  return normalize12(
+    chroma
+  );
+
+}
+
+
+/* =========================================
+   GOERTZEL
+
+   Mede a energia de uma frequência
+   específica dentro de um frame.
+
+   Útil para procurar notas graves
+   sem precisar de uma FFT separada.
+========================================= */
+
+function goertzelPower(
+  samples,
+  sampleRate,
+  frequency
+){
+
+  if(
+    !samples
+    ||
+    samples.length === 0
+    ||
+    !Number.isFinite(sampleRate)
+    ||
+    sampleRate <= 0
+    ||
+    !Number.isFinite(frequency)
+    ||
+    frequency <= 0
+  ){
+
+    return 0;
+
+  }
+
+
+  const omega =
+    2
+    *
+    Math.PI
+    *
+    frequency
+    /
+    sampleRate;
+
+
+  const coefficient =
+    2
+    *
+    Math.cos(
+      omega
+    );
+
+
+  let s0 = 0;
+  let s1 = 0;
+  let s2 = 0;
+
+
+  /*
+    Janela Hann simples.
+
+    Reduz leakage espectral.
+  */
+
+  const length =
+    samples.length;
+
+
+  for(
+    let i = 0;
+    i < length;
+    i++
+  ){
+
+    const hann =
+      0.5
+      -
+      0.5
+      *
+      Math.cos(
+        2
+        *
+        Math.PI
+        *
+        i
+        /
+        Math.max(
+          1,
+          length - 1
+        )
+      );
+
+
+    const value =
+      samples[i]
+      *
+      hann;
+
+
+    s0 =
+      value
+      +
+      coefficient
+      *
+      s1
+      -
+      s2;
+
+
+    s2 = s1;
+    s1 = s0;
+
+  }
+
+
+  const power =
+    s1 * s1
+    +
+    s2 * s2
+    -
+    coefficient
+    *
+    s1
+    *
+    s2;
+
+
+  return Math.max(
+    0,
+    power
+  );
+
+}
+
+
+/* =========================================
+   BASS CHROMA
+
+   Mede cada pitch class em várias
+   oitavas graves.
+
+   Região aproximada:
+   32 Hz → 250 Hz
+========================================= */
+
+export function extractBassChroma(
+  samples,
+  sampleRate
+){
+
+  if(
+    !samples
+    ||
+    samples.length === 0
+  ){
+
+    return new Array(12)
+      .fill(0);
+
+  }
+
+
+  const result =
+    new Array(12)
+      .fill(0);
+
+
+  /*
+    Pesos por oitava.
+
+    O grave real recebe maior peso.
+  */
+
+  const octaveWeights = [
+    1.00,
+    0.72,
+    0.38
+  ];
+
+
+  for(
+    let pitch = 0;
+    pitch < 12;
+    pitch++
+  ){
+
+    const base =
+      BASS_BASE_FREQUENCIES[
+        pitch
+      ];
+
+
+    let energy = 0;
+
+
+    for(
+      let octave = 0;
+      octave < octaveWeights.length;
+      octave++
+    ){
+
+      const frequency =
+        base
+        *
+        Math.pow(
+          2,
+          octave
+        );
+
+
+      /*
+        Ignoramos frequências
+        acima da nossa região de baixo.
+      */
+
+      if(
+        frequency > 260
+      ){
+
+        continue;
+
+      }
+
+
+      const power =
+        goertzelPower(
+          samples,
+          sampleRate,
+          frequency
+        );
+
+
+      /*
+        log reduz diferenças gigantes
+        entre amplitudes.
+      */
+
+      const compressed =
+        Math.log1p(
+          power
+        );
+
+
+      energy +=
+        compressed
+        *
+        octaveWeights[
+          octave
+        ];
+
+    }
+
+
+    result[pitch] =
+      energy;
+
+  }
+
+
+  return (
+    normalize12(result)
+    ||
+    new Array(12)
+      .fill(0)
+  );
+
+}
+
+
+/* =========================================
+   BASS CHROMA -> NOTA
+========================================= */
+
+export function bassChromaToNote(
+  bassChroma,
+  options = {}
+){
+
+  const normalized =
+    normalize12(
+      bassChroma
+    );
+
+
+  if(!normalized)
+    return null;
+
+
+  const ranked =
+    normalized
+      .map(
+        (energy,index) => ({
+
+          index,
+
+          energy
+
+        })
+      )
+      .sort(
+        (a,b) =>
+          b.energy
+          -
+          a.energy
+      );
+
+
+  if(
+    ranked.length === 0
+  ){
+
+    return null;
+
+  }
+
+
+  const first =
+    ranked[0];
+
+
+  const second =
+    ranked[1]
+    ||
+    {
+      energy:0
+    };
+
+
+  const minEnergy =
+    Number.isFinite(
+      Number(
+        options.minEnergy
+      )
+    )
+    ?
+    Number(
+      options.minEnergy
+    )
+    :
+    0.42;
+
+
+  const minimumMargin =
+    Number.isFinite(
+      Number(
+        options.minimumMargin
+      )
+    )
+    ?
+    Number(
+      options.minimumMargin
+    )
+    :
+    0.07;
+
+
+  /*
+    Não inventamos baixo quando
+    o sinal não está claro.
+  */
+
+  if(
+    first.energy <
+    minEnergy
+  ){
+
+    return null;
+
+  }
+
+
+  if(
+    (
+      first.energy
+      -
+      second.energy
+    )
+    <
+    minimumMargin
+  ){
+
+    return null;
+
+  }
+
+
+  return NOTE_NAMES[
+    first.index
+  ];
 
 }
 
@@ -218,7 +645,7 @@ export function chromaToNotes(
     5;
 
 
-  const relativeThreshold =
+  const threshold =
     Number.isFinite(
       Number(
         options.threshold
@@ -266,7 +693,8 @@ export function chromaToNotes(
       )
       .sort(
         (a,b) =>
-          b.energy -
+          b.energy
+          -
           a.energy
       );
 
@@ -288,35 +716,14 @@ export function chromaToNotes(
 
   let candidates =
     ranked.filter(
-      item => {
-
-        if(
-          item.energy <
-          minimumEnergy
-        ){
-
-          return false;
-
-        }
-
-
-        return (
-          item.energy
-          >=
-          strongest
-          *
-          relativeThreshold
-        );
-
-      }
+      item =>
+        item.energy >=
+        minimumEnergy
+        &&
+        item.energy >=
+        strongest * threshold
     );
 
-
-  /*
-    Se as três primeiras notas
-    forem fortes e a quarta muito
-    mais fraca, mantemos só três.
-  */
 
   if(
     candidates.length >= 4
@@ -324,6 +731,7 @@ export function chromaToNotes(
 
     const third =
       candidates[2].energy;
+
 
     const fourth =
       candidates[3].energy;
@@ -352,11 +760,6 @@ export function chromaToNotes(
     );
 
 
-  /*
-    Uma única nota não é
-    suficiente para um acorde.
-  */
-
   if(
     candidates.length < 2
   ){
@@ -369,7 +772,8 @@ export function chromaToNotes(
   return candidates
     .sort(
       (a,b) =>
-        a.index -
+        a.index
+        -
         b.index
     )
     .map(
@@ -381,7 +785,7 @@ export function chromaToNotes(
 
 
 /* =========================================
-   ANALISAR UM FRAME
+   ANALISAR FRAME
 ========================================= */
 
 export function analyzeAudioFrame(
@@ -393,7 +797,8 @@ export function analyzeAudioFrame(
   if(
     !samples
     ||
-    typeof samples.length !== "number"
+    typeof samples.length !==
+      "number"
     ||
     samples.length === 0
   ){
@@ -437,8 +842,10 @@ export function analyzeAudioFrame(
   Meyda.sampleRate =
     rate;
 
+
   Meyda.bufferSize =
     samples.length;
+
 
   Meyda.chromaBands =
     12;
@@ -503,23 +910,16 @@ export function analyzeAudioFrame(
     );
 
 
-  if(!chroma){
-
-    return {
-
-      valid:false,
-
-      error:
-        "Chroma inválido"
-
-    };
-
-  }
+  const bassChroma =
+    extractBassChroma(
+      samples,
+      rate
+    );
 
 
-  const rms =
-    Number(
-      features.rms || 0
+  const bassNote =
+    bassChromaToNote(
+      bassChroma
     );
 
 
@@ -529,7 +929,14 @@ export function analyzeAudioFrame(
 
     chroma,
 
-    rms,
+    bassChroma,
+
+    bassNote,
+
+    rms:
+      Number(
+        features.rms || 0
+      ),
 
     spectralCentroid:
       Number(
@@ -547,19 +954,17 @@ export function analyzeAudioFrame(
 
 
 /* =========================================
-   MEDIANA DE CHROMAS
+   MEDIANA DE VETORES 12-D
 ========================================= */
 
-export function medianChroma(
-  chromaFrames
+function medianVector12(
+  frames
 ){
 
   if(
-    !Array.isArray(
-      chromaFrames
-    )
+    !Array.isArray(frames)
     ||
-    chromaFrames.length === 0
+    frames.length === 0
   ){
 
     return null;
@@ -568,12 +973,9 @@ export function medianChroma(
 
 
   const valid =
-    chromaFrames
+    frames
       .map(
-        frame =>
-          normalizeChroma(
-            frame
-          )
+        normalize12
       )
       .filter(Boolean);
 
@@ -601,15 +1003,15 @@ export function medianChroma(
     result[pitch] =
       median(
         valid.map(
-          chroma =>
-            chroma[pitch]
+          vector =>
+            vector[pitch]
         )
       );
 
   }
 
 
-  return normalizeChroma(
+  return normalize12(
     result
   );
 
@@ -617,19 +1019,32 @@ export function medianChroma(
 
 
 /* =========================================
-   MÉDIA DE CHROMAS
+   MEDIANA DE CHROMA
+========================================= */
+
+export function medianChroma(
+  frames
+){
+
+  return medianVector12(
+    frames
+  );
+
+}
+
+
+/* =========================================
+   MÉDIA DE CHROMA
 ========================================= */
 
 export function averageChroma(
-  chromaFrames
+  frames
 ){
 
   if(
-    !Array.isArray(
-      chromaFrames
-    )
+    !Array.isArray(frames)
     ||
-    chromaFrames.length === 0
+    frames.length === 0
   ){
 
     return null;
@@ -647,16 +1062,16 @@ export function averageChroma(
 
   for(
     const frame
-    of chromaFrames
+    of frames
   ){
 
-    const chroma =
-      normalizeChroma(
+    const vector =
+      normalize12(
         frame
       );
 
 
-    if(!chroma)
+    if(!vector)
       continue;
 
 
@@ -667,7 +1082,7 @@ export function averageChroma(
     ){
 
       result[i] +=
-        chroma[i];
+        vector[i];
 
     }
 
@@ -686,120 +1101,13 @@ export function averageChroma(
   }
 
 
-  return normalizeChroma(
+  return normalize12(
 
     result.map(
       value =>
         value / count
     )
 
-  );
-
-}
-
-
-/* =========================================
-   SUAVIZAÇÃO
-========================================= */
-
-export function smoothChromaFrames(
-  frames,
-  radius = 1
-){
-
-  if(
-    !Array.isArray(frames)
-    ||
-    frames.length === 0
-  ){
-
-    return [];
-
-  }
-
-
-  const r =
-    Math.max(
-      0,
-      Math.floor(
-        Number(radius) || 0
-      )
-    );
-
-
-  return frames.map(
-    (frame,index) => {
-
-      const start =
-        Math.max(
-          0,
-          index - r
-        );
-
-
-      const end =
-        Math.min(
-          frames.length - 1,
-          index + r
-        );
-
-
-      const nearby =
-        [];
-
-
-      for(
-        let i = start;
-        i <= end;
-        i++
-      ){
-
-        if(
-          frames[i]
-          &&
-          frames[i].chroma
-        ){
-
-          nearby.push(
-            frames[i].chroma
-          );
-
-        }
-
-      }
-
-
-      const chroma =
-        medianChroma(
-          nearby
-        );
-
-
-      return {
-
-        ...frame,
-
-        chroma,
-
-        notes:
-          chroma
-          ?
-          chromaToNotes(
-            chroma,
-            {
-              threshold:
-                0.62,
-
-              maxNotes:
-                5
-            }
-          )
-          :
-          []
-
-      };
-
-    }
   );
 
 }
@@ -874,9 +1182,7 @@ export function toMono(
 ){
 
   if(
-    !Array.isArray(
-      channelData
-    )
+    !Array.isArray(channelData)
     ||
     channelData.length === 0
   ){
@@ -911,14 +1217,9 @@ export function toMono(
 
 
   for(
-    let channel = 0;
-    channel < channelData.length;
-    channel++
+    const samples
+    of channelData
   ){
-
-    const samples =
-      channelData[channel];
-
 
     for(
       let i = 0;
@@ -942,7 +1243,7 @@ export function toMono(
 
 
 /* =========================================
-   LIMIAR DE SILÊNCIO — CORRIGIDO
+   LIMIAR DE SILÊNCIO
 ========================================= */
 
 function calculateRmsFloor(
@@ -1004,7 +1305,7 @@ function calculateRmsFloor(
   }
 
 
-  const percentileIndex =
+  const lowIndex =
     Math.floor(
       values.length * 0.10
     );
@@ -1013,47 +1314,33 @@ function calculateRmsFloor(
   const lowLevel =
     values[
       Math.min(
-        percentileIndex,
+        lowIndex,
         values.length - 1
       )
     ];
 
 
-  /*
-    Nunca exigimos mais
-    de 8% do pico da música.
-  */
-
   const relativeFloor =
     maxRms * 0.08;
 
 
-  /*
-    Se houver silêncio real,
-    lowLevel tende a ser baixo.
+  return Math.max(
+    0.0003,
 
-    Se a música for contínua,
-    impedimos o threshold de
-    subir demais.
-  */
-
-  const adaptiveFloor =
     Math.min(
       lowLevel * 1.35,
       relativeFloor
-    );
-
-
-  return Math.max(
-    0.0003,
-    adaptiveFloor
+    )
   );
 
 }
 
 
 /* =========================================
-   AGRUPAR FRAMES EM JANELAS MUSICAIS
+   AGREGAÇÃO TEMPORAL
+
+   Full chroma + bass chroma são
+   suavizados independentemente.
 ========================================= */
 
 function aggregateFrames(
@@ -1115,32 +1402,28 @@ function aggregateFrames(
 
 
   console.log(
-    "[Audio Engine] RMS floor:",
+    "[Audio Engine v3] RMS floor:",
     rmsFloor
   );
 
 
-  const lastFrame =
+  const duration =
     rawFrames[
       rawFrames.length - 1
-    ];
-
-
-  const duration =
-    lastFrame.time;
+    ].time;
 
 
   const output = [];
 
 
   for(
-    let startTime = 0;
-    startTime <= duration;
-    startTime += hopSeconds
+    let time = 0;
+    time <= duration;
+    time += hopSeconds
   ){
 
-    const endTime =
-      startTime
+    const end =
+      time
       +
       windowSeconds;
 
@@ -1148,9 +1431,9 @@ function aggregateFrames(
     const members =
       rawFrames.filter(
         frame =>
-          frame.time >= startTime
+          frame.time >= time
           &&
-          frame.time < endTime
+          frame.time < end
           &&
           frame.rms >= rmsFloor
       );
@@ -1162,23 +1445,21 @@ function aggregateFrames(
 
       output.push({
 
-        time:
-          startTime,
+        time,
 
-        chroma:
-          null,
+        chroma:null,
 
-        notes:
-          [],
+        bassChroma:null,
 
-        rms:
-          0,
+        bassNote:null,
 
-        silence:
-          true,
+        notes:[],
 
-        sourceFrames:
-          0
+        rms:0,
+
+        silence:true,
+
+        sourceFrames:0
 
       });
 
@@ -1189,20 +1470,39 @@ function aggregateFrames(
 
 
     const chroma =
-      medianChroma(
+      medianVector12(
+
         members.map(
           frame =>
             frame.chroma
         )
+
       );
 
 
-    const rms =
-      median(
+    const bassChroma =
+      medianVector12(
+
         members.map(
           frame =>
-            frame.rms
+            frame.bassChroma
         )
+
+      );
+
+
+    const bassNote =
+      bassChromaToNote(
+        bassChroma,
+        {
+
+          minEnergy:
+            0.40,
+
+          minimumMargin:
+            0.06
+
+        }
       );
 
 
@@ -1214,29 +1514,13 @@ function aggregateFrames(
         {
 
           threshold:
-            Number.isFinite(
-              Number(
-                options.threshold
-              )
-            )
-            ?
-            Number(
-              options.threshold
-            )
-            :
+            options.threshold
+            ??
             0.62,
 
           maxNotes:
-            Number.isFinite(
-              Number(
-                options.maxNotes
-              )
-            )
-            ?
-            Number(
-              options.maxNotes
-            )
-            :
+            options.maxNotes
+            ??
             5
 
         }
@@ -1245,19 +1529,30 @@ function aggregateFrames(
       [];
 
 
+    const rms =
+      median(
+        members.map(
+          frame =>
+            frame.rms
+        )
+      );
+
+
     output.push({
 
-      time:
-        startTime,
+      time,
 
       chroma,
+
+      bassChroma,
+
+      bassNote,
 
       notes,
 
       rms,
 
-      silence:
-        false,
+      silence:false,
 
       sourceFrames:
         members.length
@@ -1265,21 +1560,16 @@ function aggregateFrames(
     });
 
 
-    /*
-      Diagnóstico dos primeiros
-      frames musicais.
-    */
-
     if(
-      output.length <= 10
+      output.length <= 12
     ){
 
       console.log(
-        "[Audio Engine]",
-        startTime.toFixed(2),
-        "s | RMS:",
-        rms.toFixed(4),
-        "| notas:",
+        "[Audio Engine v3]",
+        time.toFixed(2),
+        "bass:",
+        bassNote,
+        "notes:",
         notes.join(",")
       );
 
@@ -1294,10 +1584,15 @@ function aggregateFrames(
 
 
 /* =========================================
-   PERSISTÊNCIA DAS NOTAS
+   PERSISTÊNCIA DO BAIXO
+
+   Evita:
+   A → G# → A → A#
+
+   por um único frame ruidoso.
 ========================================= */
 
-function enforceNotePersistence(
+function stabilizeBassNotes(
   frames,
   radius = 1
 ){
@@ -1316,20 +1611,6 @@ function enforceNotePersistence(
   return frames.map(
     (frame,index) => {
 
-      if(
-        !frame.notes
-        ||
-        frame.notes.length === 0
-      ){
-
-        return {
-          ...frame,
-          notes:[]
-        };
-
-      }
-
-
       const start =
         Math.max(
           0,
@@ -1344,7 +1625,7 @@ function enforceNotePersistence(
         );
 
 
-      const count = {};
+      const counts = {};
 
 
       for(
@@ -1353,70 +1634,78 @@ function enforceNotePersistence(
         i++
       ){
 
-        const notes =
-          frames[i].notes || [];
+        const note =
+          frames[i]
+          &&
+          frames[i].bassNote;
 
 
-        for(
-          const note
-          of notes
-        ){
+        if(!note)
+          continue;
 
-          count[note] =
-            (
-              count[note] || 0
-            )
-            +
-            1;
 
-        }
+        counts[note] =
+          (
+            counts[note] || 0
+          )
+          +
+          1;
 
       }
 
 
-      const neighborhoodSize =
-        end - start + 1;
-
-
-      let persistent =
-        frame.notes.filter(
-          note =>
-            (
-              count[note] || 0
-            )
-            >=
-            Math.ceil(
-              neighborhoodSize * 0.5
-            )
+      const entries =
+        Object.entries(
+          counts
+        )
+        .sort(
+          (a,b) =>
+            b[1]
+            -
+            a[1]
         );
 
 
-      /*
-        Não deixa um acorde sumir
-        por diferença pequena.
-      */
-
       if(
-        persistent.length < 2
-        &&
-        frame.notes.length >= 2
+        entries.length === 0
       ){
 
-        persistent =
-          frame.notes.slice(
-            0,
-            3
-          );
+        return {
+          ...frame,
+          bassNote:null
+        };
 
       }
+
+
+      const [
+        bestNote,
+        count
+      ] =
+        entries[0];
+
+
+      const neighborhood =
+        end - start + 1;
+
+
+      const stable =
+        count >=
+        Math.ceil(
+          neighborhood * 0.5
+        );
 
 
       return {
 
         ...frame,
 
-        notes:
-          persistent
+        bassNote:
+          stable
+          ?
+          bestNote
+          :
+          frame.bassNote
 
       };
 
@@ -1534,10 +1823,18 @@ export async function analyzeWavBuffer(
     rawFrames.push({
 
       time:
-        start / sampleRate,
+        start
+        /
+        sampleRate,
 
       chroma:
         analysis.chroma,
+
+      bassChroma:
+        analysis.bassChroma,
+
+      bassNote:
+        analysis.bassNote,
 
       rms:
         analysis.rms,
@@ -1558,14 +1855,14 @@ export async function analyzeWavBuffer(
   ){
 
     throw new Error(
-      "Nenhum frame de áudio pôde ser analisado"
+      "Nenhum frame pôde ser analisado"
     );
 
   }
 
 
   /* =====================================
-     2. AGREGAÇÃO TEMPORAL
+     2. AGREGAÇÃO
   ===================================== */
 
   let decisionFrames =
@@ -1574,55 +1871,23 @@ export async function analyzeWavBuffer(
       {
 
         threshold:
-          Number.isFinite(
-            Number(
-              options.threshold
-            )
-          )
-          ?
-          Number(
-            options.threshold
-          )
-          :
+          options.threshold
+          ??
           0.62,
 
         maxNotes:
-          Number.isFinite(
-            Number(
-              options.maxNotes
-            )
-          )
-          ?
-          Number(
-            options.maxNotes
-          )
-          :
+          options.maxNotes
+          ??
           5,
 
         windowSeconds:
-          Number.isFinite(
-            Number(
-              options.windowSeconds
-            )
-          )
-          ?
-          Number(
-            options.windowSeconds
-          )
-          :
+          options.windowSeconds
+          ??
           0.28,
 
         decisionHopSeconds:
-          Number.isFinite(
-            Number(
-              options.decisionHopSeconds
-            )
-          )
-          ?
-          Number(
-            options.decisionHopSeconds
-          )
-          :
+          options.decisionHopSeconds
+          ??
           0.20
 
       }
@@ -1630,37 +1895,35 @@ export async function analyzeWavBuffer(
 
 
   /* =====================================
-     3. PERSISTÊNCIA DAS NOTAS
+     3. ESTABILIZAR BAIXO
   ===================================== */
 
   decisionFrames =
-    enforceNotePersistence(
+    stabilizeBassNotes(
       decisionFrames,
       1
     );
 
 
   /* =====================================
-     4. NORMALIZAR FRAMES SEM HARMONIA
+     4. FRAMES FINAIS
   ===================================== */
 
-  const usefulFrames =
+  const frames =
     decisionFrames.map(
       frame => {
 
         if(
           frame.silence
-          ||
-          !frame.notes
-          ||
-          frame.notes.length < 2
         ){
 
           return {
 
             ...frame,
 
-            notes:[]
+            notes:[],
+
+            bassNote:null
 
           };
 
@@ -1686,10 +1949,9 @@ export async function analyzeWavBuffer(
       rawFrames.length,
 
     frameCount:
-      usefulFrames.length,
+      frames.length,
 
-    frames:
-      usefulFrames
+    frames
 
   };
 
@@ -1697,7 +1959,98 @@ export async function analyzeWavBuffer(
 
 
 /* =========================================
-   TESTE INTERNO DE CHROMA
+   SUAVIZAÇÃO LEGADA
+========================================= */
+
+export function smoothChromaFrames(
+  frames,
+  radius = 1
+){
+
+  if(
+    !Array.isArray(frames)
+    ||
+    frames.length === 0
+  ){
+
+    return [];
+
+  }
+
+
+  return frames.map(
+    (frame,index) => {
+
+      const start =
+        Math.max(
+          0,
+          index - radius
+        );
+
+
+      const end =
+        Math.min(
+          frames.length - 1,
+          index + radius
+        );
+
+
+      const nearby =
+        [];
+
+
+      for(
+        let i = start;
+        i <= end;
+        i++
+      ){
+
+        if(
+          frames[i]
+          &&
+          frames[i].chroma
+        ){
+
+          nearby.push(
+            frames[i].chroma
+          );
+
+        }
+
+      }
+
+
+      const chroma =
+        medianVector12(
+          nearby
+        );
+
+
+      return {
+
+        ...frame,
+
+        chroma,
+
+        notes:
+          chroma
+          ?
+          chromaToNotes(
+            chroma
+          )
+          :
+          []
+
+      };
+
+    }
+  );
+
+}
+
+
+/* =========================================
+   TESTE INTERNO
 ========================================= */
 
 export function createChromaTest(
@@ -1705,9 +2058,7 @@ export function createChromaTest(
 ){
 
   if(
-    !Array.isArray(
-      notes
-    )
+    !Array.isArray(notes)
   ){
 
     return null;
@@ -1725,15 +2076,11 @@ export function createChromaTest(
     of notes
   ){
 
-    const normalized =
-      String(note)
-        .trim()
-        .toUpperCase();
-
-
     const index =
       NOTE_NAMES.indexOf(
-        normalized
+        String(note)
+          .trim()
+          .toUpperCase()
       );
 
 
@@ -1741,8 +2088,7 @@ export function createChromaTest(
       index >= 0
     ){
 
-      chroma[index] =
-        1;
+      chroma[index] = 1;
 
     }
 
@@ -1758,11 +2104,9 @@ export function createChromaTest(
         chroma,
         {
 
-          threshold:
-            0.5,
+          threshold:0.5,
 
-          maxNotes:
-            6
+          maxNotes:6
 
         }
       )
