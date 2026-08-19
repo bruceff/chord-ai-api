@@ -1,9 +1,23 @@
 /* =========================================
-   CHORD AI — MUSIC ENGINE
-   Núcleo de teoria musical
+   CHORD AI — CHORD ENGINE v2.2
+
+   Responsável por:
+
+   - entender símbolos de acordes
+   - converter acorde -> notas
+   - detectar acorde a partir de notas
+   - criar timeline harmônica
+   - estabilizar mudanças de acordes
+   - transpor acordes
+========================================= */
+
+
+/* =========================================
+   NOTAS
 ========================================= */
 
 const NOTES = [
+
   "C",
   "C#",
   "D",
@@ -16,6 +30,7 @@ const NOTES = [
   "A",
   "A#",
   "B"
+
 ];
 
 
@@ -43,76 +58,135 @@ const ENHARMONIC = {
 /* =========================================
    TIPOS DE ACORDES
 
-   Valores = intervalos em semitons
+   Intervalos em semitons
 ========================================= */
 
 const CHORD_TYPES = {
 
-  "": [0,4,7],
+  /* MAIOR */
 
-  "M": [0,4,7],
+  "":
+    [0,4,7],
 
-  "MAJ": [0,4,7],
+  "MAJ":
+    [0,4,7],
 
-  "MIN": [0,3,7],
 
-  "M7": [0,3,7,10],
+  /* MENOR */
 
-  "MIN7": [0,3,7,10],
+  "MIN":
+    [0,3,7],
 
-  "7": [0,4,7,10],
 
-  "MAJ7": [0,4,7,11],
+  /* SÉTIMAS */
 
-  "MMAJ7": [0,3,7,11],
+  "MIN7":
+    [0,3,7,10],
 
-  "6": [0,4,7,9],
+  "7":
+    [0,4,7,10],
 
-  "M6": [0,3,7,9],
+  "MAJ7":
+    [0,4,7,11],
 
-  "9": [0,4,7,10,14],
+  "MINMAJ7":
+    [0,3,7,11],
 
-  "MAJ9": [0,4,7,11,14],
 
-  "M9": [0,3,7,10,14],
+  /* SEXTAS */
 
-  "11": [0,4,7,10,14,17],
+  "6":
+    [0,4,7,9],
 
-  "M11": [0,3,7,10,14,17],
+  "MIN6":
+    [0,3,7,9],
 
-  "13": [0,4,7,10,14,17,21],
 
-  "M13": [0,3,7,10,14,17,21],
+  /* NONAS */
 
-  "SUS2": [0,2,7],
+  "9":
+    [0,4,7,10,14],
 
-  "SUS4": [0,5,7],
+  "MAJ9":
+    [0,4,7,11,14],
 
-  "DIM": [0,3,6],
+  "MIN9":
+    [0,3,7,10,14],
 
-  "DIM7": [0,3,6,9],
 
-  "M7B5": [0,3,6,10],
+  /* DÉCIMA PRIMEIRA */
 
-  "AUG": [0,4,8],
+  "11":
+    [0,4,7,10,14,17],
 
-  "+": [0,4,8],
+  "MIN11":
+    [0,3,7,10,14,17],
 
-  "ADD9": [0,4,7,14],
 
-  "MADD9": [0,3,7,14],
+  /* DÉCIMA TERCEIRA */
 
-  "7SUS4": [0,5,7,10],
+  "13":
+    [0,4,7,10,14,17,21],
 
-  "7B5": [0,4,6,10],
+  "MIN13":
+    [0,3,7,10,14,17,21],
 
-  "7#5": [0,4,8,10],
 
-  "7B9": [0,4,7,10,13],
+  /* SUSPENSOS */
 
-  "7#9": [0,4,7,10,15],
+  "SUS2":
+    [0,2,7],
 
-  "MAJ7#11": [0,4,7,11,18]
+  "SUS4":
+    [0,5,7],
+
+  "7SUS4":
+    [0,5,7,10],
+
+
+  /* DIMINUTOS */
+
+  "DIM":
+    [0,3,6],
+
+  "DIM7":
+    [0,3,6,9],
+
+  "MIN7B5":
+    [0,3,6,10],
+
+
+  /* AUMENTADO */
+
+  "AUG":
+    [0,4,8],
+
+
+  /* ADICIONADOS */
+
+  "ADD9":
+    [0,4,7,14],
+
+  "MINADD9":
+    [0,3,7,14],
+
+
+  /* ALTERADOS */
+
+  "7B5":
+    [0,4,6,10],
+
+  "7#5":
+    [0,4,8,10],
+
+  "7B9":
+    [0,4,7,10,13],
+
+  "7#9":
+    [0,4,7,10,15],
+
+  "MAJ7#11":
+    [0,4,7,11,18]
 
 };
 
@@ -121,7 +195,9 @@ const CHORD_TYPES = {
    NORMALIZAR NOTA
 ========================================= */
 
-function normalizeNote(note){
+function normalizeNote(
+  note
+){
 
   if(!note)
     return null;
@@ -158,7 +234,9 @@ function normalizeNote(note){
 
 
   if(
-    NOTES.includes(value)
+    NOTES.includes(
+      value
+    )
   ){
 
     return value;
@@ -175,10 +253,14 @@ function normalizeNote(note){
    ÍNDICE DA NOTA
 ========================================= */
 
-function noteIndex(note){
+function noteIndex(
+  note
+){
 
   const normalized =
-    normalizeNote(note);
+    normalizeNote(
+      note
+    );
 
 
   if(!normalized)
@@ -202,7 +284,9 @@ export function transposeNote(
 ){
 
   const index =
-    noteIndex(note);
+    noteIndex(
+      note
+    );
 
 
   if(index < 0)
@@ -211,8 +295,11 @@ export function transposeNote(
 
   let next =
     (
-      index +
-      semitones
+      index
+      +
+      Number(
+        semitones
+      )
     ) % 12;
 
 
@@ -226,13 +313,311 @@ export function transposeNote(
 
 
 /* =========================================
-   EXTRAIR PARTES DO ACORDE
+   NORMALIZAR QUALIDADE
 ========================================= */
 
-function parseChordSymbol(symbol){
+function normalizeQuality(
+  quality
+){
 
   if(
-    typeof symbol !== "string"
+    quality == null
+  ){
+
+    return "";
+
+  }
+
+
+  let value =
+    String(quality)
+      .trim();
+
+
+  if(
+    value === ""
+  ){
+
+    return "";
+
+  }
+
+
+  value =
+    value
+      .replace(/major/gi,"maj")
+      .replace(/minor/gi,"min")
+      .replace(/Δ/g,"maj")
+      .replace(/ø/g,"m7b5")
+      .replace(/°/g,"dim");
+
+
+  /*
+    IMPORTANTE:
+
+    Precisamos distinguir:
+
+    m
+    M
+    maj
+
+    Portanto tratamos "m"
+    antes de upperCase.
+  */
+
+
+  if(
+    /^m$/i.test(value)
+  ){
+
+    return "MIN";
+
+  }
+
+
+  if(
+    /^min$/i.test(value)
+  ){
+
+    return "MIN";
+
+  }
+
+
+  if(
+    /^m7$/i.test(value)
+  ){
+
+    return "MIN7";
+
+  }
+
+
+  if(
+    /^min7$/i.test(value)
+  ){
+
+    return "MIN7";
+
+  }
+
+
+  if(
+    /^m6$/i.test(value)
+  ){
+
+    return "MIN6";
+
+  }
+
+
+  if(
+    /^m9$/i.test(value)
+  ){
+
+    return "MIN9";
+
+  }
+
+
+  if(
+    /^m11$/i.test(value)
+  ){
+
+    return "MIN11";
+
+  }
+
+
+  if(
+    /^m13$/i.test(value)
+  ){
+
+    return "MIN13";
+
+  }
+
+
+  if(
+    /^mmaj7$/i.test(value)
+  ){
+
+    return "MINMAJ7";
+
+  }
+
+
+  if(
+    /^m7b5$/i.test(value)
+  ){
+
+    return "MIN7B5";
+
+  }
+
+
+  if(
+    /^madd9$/i.test(value)
+  ){
+
+    return "MINADD9";
+
+  }
+
+
+  if(
+    /^maj$/i.test(value)
+  ){
+
+    return "";
+
+  }
+
+
+  if(
+    /^M$/.test(value)
+  ){
+
+    return "";
+
+  }
+
+
+  if(
+    value === "+"
+  ){
+
+    return "AUG";
+
+  }
+
+
+  return value
+    .toUpperCase();
+
+}
+
+
+/* =========================================
+   QUALIDADE -> SÍMBOLO
+========================================= */
+
+function qualityToSymbol(
+  quality
+){
+
+  const map = {
+
+    "":
+      "",
+
+    "MIN":
+      "m",
+
+    "MIN7":
+      "m7",
+
+    "7":
+      "7",
+
+    "MAJ7":
+      "maj7",
+
+    "MINMAJ7":
+      "mMaj7",
+
+    "6":
+      "6",
+
+    "MIN6":
+      "m6",
+
+    "9":
+      "9",
+
+    "MAJ9":
+      "maj9",
+
+    "MIN9":
+      "m9",
+
+    "11":
+      "11",
+
+    "MIN11":
+      "m11",
+
+    "13":
+      "13",
+
+    "MIN13":
+      "m13",
+
+    "SUS2":
+      "sus2",
+
+    "SUS4":
+      "sus4",
+
+    "DIM":
+      "dim",
+
+    "DIM7":
+      "dim7",
+
+    "MIN7B5":
+      "m7b5",
+
+    "AUG":
+      "aug",
+
+    "ADD9":
+      "add9",
+
+    "MINADD9":
+      "madd9",
+
+    "7SUS4":
+      "7sus4",
+
+    "7B5":
+      "7b5",
+
+    "7#5":
+      "7#5",
+
+    "7B9":
+      "7b9",
+
+    "7#9":
+      "7#9",
+
+    "MAJ7#11":
+      "maj7#11"
+
+  };
+
+
+  return (
+    map[quality]
+    ??
+    quality.toLowerCase()
+  );
+
+}
+
+
+/* =========================================
+   PARSE DO ACORDE
+========================================= */
+
+function parseChordSymbol(
+  symbol
+){
+
+  if(
+    typeof symbol !==
+    "string"
   ){
 
     return null;
@@ -243,21 +628,15 @@ function parseChordSymbol(symbol){
   let value =
     symbol
       .trim()
-      .replace(/\s+/g,"");
+      .replace(
+        /\s+/g,
+        ""
+      );
 
 
   if(!value)
     return null;
 
-
-  /*
-    Exemplo:
-
-    Cmaj7/E
-
-    chordPart = Cmaj7
-    bassPart  = E
-  */
 
   const slashParts =
     value.split("/");
@@ -268,16 +647,10 @@ function parseChordSymbol(symbol){
 
 
   const bassPart =
-    slashParts[1] || null;
+    slashParts[1]
+    ||
+    null;
 
-
-  /*
-    Captura fundamental:
-
-    C
-    C#
-    Db
-  */
 
   const match =
     chordPart.match(
@@ -289,44 +662,24 @@ function parseChordSymbol(symbol){
     return null;
 
 
-  let root =
-    match[1]
-    +
-    (
-      match[2] || ""
+  const root =
+    normalizeNote(
+      match[1]
+      +
+      (
+        match[2] || ""
+      )
     );
-
-
-  root =
-    normalizeNote(root);
 
 
   if(!root)
     return null;
 
 
-  let quality =
-    (
+  const quality =
+    normalizeQuality(
       match[3] || ""
-    )
-    .trim();
-
-
-  /*
-    Normalizações
-  */
-
-  quality =
-    quality
-      .replace(/minor/gi,"m")
-      .replace(/min/gi,"m")
-      .replace(/major/gi,"maj")
-      .replace(/Δ/gi,"maj")
-      .replace(/ø/gi,"m7b5");
-
-
-  quality =
-    quality.toUpperCase();
+    );
 
 
   const bass =
@@ -356,96 +709,6 @@ function parseChordSymbol(symbol){
 
 
 /* =========================================
-   PEGAR INTERVALOS
-========================================= */
-
-function getIntervals(
-  quality
-){
-
-  /*
-    Acorde simples maior
-  */
-
-  if(
-    quality === ""
-  ){
-
-    return CHORD_TYPES[""];
-
-  }
-
-
-  /*
-    Caso "m"
-  */
-
-  if(
-    quality === "M"
-  ){
-
-    /*
-      Atenção:
-      depois de upperCase,
-      "m" vira "M".
-
-      Neste parser consideramos M
-      vindo de "m" como menor.
-    */
-
-    return [
-      0,3,7
-    ];
-
-  }
-
-
-  /*
-    aliases mais comuns
-  */
-
-  const aliases = {
-
-    "MIN":
-      "MIN",
-
-    "MIN7":
-      "MIN7",
-
-    "M7":
-      "M7",
-
-    "MAJOR7":
-      "MAJ7",
-
-    "MINOR7":
-      "MIN7",
-
-    "°":
-      "DIM",
-
-    "°7":
-      "DIM7"
-
-  };
-
-
-  const key =
-    aliases[quality]
-    ||
-    quality;
-
-
-  return (
-    CHORD_TYPES[key]
-    ||
-    null
-  );
-
-}
-
-
-/* =========================================
    ANALISAR ACORDE
 ========================================= */
 
@@ -465,7 +728,8 @@ export function analyzeChord(
 
       valid:false,
 
-      chord:symbol,
+      chord:
+        symbol,
 
       error:
         "Acorde inválido"
@@ -476,9 +740,9 @@ export function analyzeChord(
 
 
   const intervals =
-    getIntervals(
+    CHORD_TYPES[
       parsed.quality
-    );
+    ];
 
 
   if(!intervals){
@@ -487,7 +751,8 @@ export function analyzeChord(
 
       valid:false,
 
-      chord:symbol,
+      chord:
+        symbol,
 
       root:
         parsed.root,
@@ -517,7 +782,8 @@ export function analyzeChord(
           interval =>
             NOTES[
               (
-                rootIndex +
+                rootIndex
+                +
                 interval
               ) % 12
             ]
@@ -527,16 +793,23 @@ export function analyzeChord(
     ];
 
 
-  /*
-    Caso exista inversão,
-    coloca o baixo primeiro
-  */
-
   let voicing =
     [...notes];
 
 
-  if(parsed.bass){
+  /*
+    Inversão explícita no símbolo.
+
+    Ex:
+    C/E
+
+    Aqui podemos usar porque o usuário
+    realmente informou o baixo.
+  */
+
+  if(
+    parsed.bass
+  ){
 
     voicing =
       [
@@ -592,6 +865,16 @@ export function transposeChord(
   semitones
 ){
 
+  const parsed =
+    parseChordSymbol(
+      symbol
+    );
+
+
+  if(!parsed)
+    return null;
+
+
   const chord =
     analyzeChord(
       symbol
@@ -604,43 +887,37 @@ export function transposeChord(
 
   const newRoot =
     transposeNote(
-      chord.root,
+      parsed.root,
       semitones
     );
 
 
-  const newBass =
-    chord.bass
-    ?
-    transposeNote(
-      chord.bass,
-      semitones
-    )
-    :
-    null;
-
-
-  const parsed =
-    parseChordSymbol(
-      symbol
+  const qualitySymbol =
+    qualityToSymbol(
+      parsed.quality
     );
 
 
   let result =
     newRoot
     +
-    (
-      parsed.quality
-        .toLowerCase()
-    );
+    qualitySymbol;
 
 
   if(
     parsed.bass
   ){
 
+    const newBass =
+      transposeNote(
+        parsed.bass,
+        semitones
+      );
+
+
     result +=
-      "/" +
+      "/"
+      +
       newBass;
 
   }
@@ -652,7 +929,481 @@ export function transposeChord(
 
 
 /* =========================================
-   CRIAR TIMELINE
+   COMPLEXIDADE DO ACORDE
+
+   Usada pelo detector.
+
+   Em caso de empate, acordes simples
+   ganham ligeira preferência.
+
+   Mas acordes complexos continuam
+   podendo vencer quando há evidência.
+========================================= */
+
+function chordComplexityPenalty(
+  intervals
+){
+
+  if(
+    !Array.isArray(
+      intervals
+    )
+  ){
+
+    return 0;
+
+  }
+
+
+  const size =
+    [
+      ...new Set(
+        intervals.map(
+          value =>
+            value % 12
+        )
+      )
+    ].length;
+
+
+  if(
+    size <= 3
+  ){
+
+    return 0;
+
+  }
+
+
+  return (
+    size - 3
+  )
+  *
+  0.025;
+
+}
+
+
+/* =========================================
+   DETECTAR ACORDE A PARTIR DE NOTAS
+========================================= */
+
+export function detectChord(
+  inputNotes
+){
+
+  if(
+    !Array.isArray(
+      inputNotes
+    )
+    ||
+    inputNotes.length < 2
+  ){
+
+    return {
+
+      valid:false,
+
+      error:
+        "Notas insuficientes"
+
+    };
+
+  }
+
+
+  const normalized =
+    inputNotes
+      .map(
+        normalizeNote
+      )
+      .filter(Boolean);
+
+
+  if(
+    normalized.length < 2
+  ){
+
+    return {
+
+      valid:false,
+
+      error:
+        "Notas inválidas"
+
+    };
+
+  }
+
+
+  const unique =
+    [
+      ...new Set(
+        normalized
+      )
+    ];
+
+
+  const inputIndexes =
+    unique.map(
+      noteIndex
+    );
+
+
+  const candidates = [];
+
+
+  for(
+    let rootIndex = 0;
+    rootIndex < 12;
+    rootIndex++
+  ){
+
+    for(
+      const [
+        quality,
+        intervals
+      ]
+      of
+      Object.entries(
+        CHORD_TYPES
+      )
+    ){
+
+      /*
+        Não temos mais aliases duplicados
+        de maior/menor no CHORD_TYPES.
+
+        Portanto MIN participa normalmente.
+      */
+
+
+      const expected =
+        [
+          ...new Set(
+            intervals.map(
+              interval =>
+                (
+                  rootIndex
+                  +
+                  interval
+                ) % 12
+            )
+          )
+        ];
+
+
+      const matched =
+        expected.filter(
+          pitch =>
+            inputIndexes.includes(
+              pitch
+            )
+        );
+
+
+      const missing =
+        expected.filter(
+          pitch =>
+            !inputIndexes.includes(
+              pitch
+            )
+        );
+
+
+      const extra =
+        inputIndexes.filter(
+          pitch =>
+            !expected.includes(
+              pitch
+            )
+        );
+
+
+      const coverage =
+        matched.length
+        /
+        expected.length;
+
+
+      const precision =
+        matched.length
+        /
+        inputIndexes.length;
+
+
+      let score =
+        coverage * 0.62
+        +
+        precision * 0.38;
+
+
+      /*
+        Notas extras.
+      */
+
+      score -=
+        extra.length
+        *
+        0.10;
+
+
+      /*
+        Notas faltando.
+      */
+
+      score -=
+        missing.length
+        *
+        0.08;
+
+
+      /*
+        Pequena preferência por
+        estruturas simples.
+      */
+
+      score -=
+        chordComplexityPenalty(
+          intervals
+        );
+
+
+      /*
+        Bônus quando TODAS as notas
+        detectadas pertencem ao acorde.
+      */
+
+      if(
+        extra.length === 0
+      ){
+
+        score +=
+          0.04;
+
+      }
+
+
+      /*
+        Bônus para encaixe perfeito.
+      */
+
+      if(
+        missing.length === 0
+        &&
+        extra.length === 0
+      ){
+
+        score +=
+          0.08;
+
+      }
+
+
+      /*
+        Fundamental detectada.
+
+        Não significa que ela está no baixo.
+        Apenas aumenta levemente a chance
+        desse acorde.
+      */
+
+      if(
+        inputIndexes.includes(
+          rootIndex
+        )
+      ){
+
+        score +=
+          0.025;
+
+      }
+
+
+      candidates.push({
+
+        root:
+          NOTES[rootIndex],
+
+        rootIndex,
+
+        quality,
+
+        intervals,
+
+        expected,
+
+        matched,
+
+        missing,
+
+        extra,
+
+        score
+
+      });
+
+    }
+
+  }
+
+
+  candidates.sort(
+    (a,b) =>
+      b.score
+      -
+      a.score
+  );
+
+
+  const best =
+    candidates[0];
+
+
+  if(
+    !best
+    ||
+    best.score <
+    0.42
+  ){
+
+    return {
+
+      valid:false,
+
+      error:
+        "Nenhum acorde confiável encontrado"
+
+    };
+
+  }
+
+
+  const symbol =
+    best.root
+    +
+    qualityToSymbol(
+      best.quality
+    );
+
+
+  /*
+    IMPORTANTE:
+
+    Chroma NÃO informa baixo.
+
+    Portanto não usamos:
+    normalized[0]
+
+    e não inventamos:
+    C/E
+    G/B
+    F/A
+
+    Um detector específico de baixo
+    será adicionado depois.
+  */
+
+  const bass =
+    null;
+
+
+  const confidence =
+    Math.max(
+      0,
+      Math.min(
+        1,
+        Number(
+          best.score
+            .toFixed(3)
+        )
+      )
+    );
+
+
+  return {
+
+    valid:true,
+
+    chord:
+      symbol,
+
+    root:
+      best.root,
+
+    quality:
+      best.quality,
+
+    bass:
+      null,
+
+    notes:
+      unique,
+
+    expectedNotes:
+      best.expected.map(
+        index =>
+          NOTES[index]
+      ),
+
+    matchedNotes:
+      best.matched.map(
+        index =>
+          NOTES[index]
+      ),
+
+    missingNotes:
+      best.missing.map(
+        index =>
+          NOTES[index]
+      ),
+
+    extraNotes:
+      best.extra.map(
+        index =>
+          NOTES[index]
+      ),
+
+    confidence,
+
+    alternatives:
+      candidates
+        .slice(
+          1,
+          5
+        )
+        .map(
+          item => ({
+
+            chord:
+              item.root
+              +
+              qualityToSymbol(
+                item.quality
+              ),
+
+            confidence:
+              Math.max(
+                0,
+                Math.min(
+                  1,
+                  Number(
+                    item.score
+                      .toFixed(3)
+                  )
+                )
+              )
+
+          })
+        )
+
+  };
+
+}
+
+
+/* =========================================
+   NORMALIZAR TIMELINE EXISTENTE
 ========================================= */
 
 export function normalizeTimeline(
@@ -660,7 +1411,9 @@ export function normalizeTimeline(
 ){
 
   if(
-    !Array.isArray(chords)
+    !Array.isArray(
+      chords
+    )
   ){
 
     return [];
@@ -747,12 +1500,11 @@ export function normalizeTimeline(
 
       }
     )
-
     .filter(Boolean)
-
     .sort(
       (a,b) =>
-        a.start -
+        a.start
+        -
         b.start
     );
 
@@ -760,7 +1512,7 @@ export function normalizeTimeline(
 
 
 /* =========================================
-   ACORDE EM DETERMINADO TEMPO
+   ACORDE EM UM DETERMINADO TEMPO
 ========================================= */
 
 export function getChordAtTime(
@@ -769,7 +1521,9 @@ export function getChordAtTime(
 ){
 
   if(
-    !Array.isArray(timeline)
+    !Array.isArray(
+      timeline
+    )
   ){
 
     return null;
@@ -778,11 +1532,15 @@ export function getChordAtTime(
 
 
   const seconds =
-    Number(time);
+    Number(
+      time
+    );
 
 
   if(
-    !Number.isFinite(seconds)
+    !Number.isFinite(
+      seconds
+    )
   ){
 
     return null;
@@ -793,455 +1551,19 @@ export function getChordAtTime(
   return (
     timeline.find(
       item =>
-        seconds >= item.start
+        seconds >=
+        item.start
         &&
-        seconds < item.end
+        seconds <
+        item.end
     )
     ||
     null
   );
 
 }
-/* =========================================
-   DETECTAR ACORDE A PARTIR DE NOTAS
-========================================= */
 
-export function detectChord(
-  inputNotes
-){
 
-  if(
-    !Array.isArray(inputNotes)
-    ||
-    inputNotes.length < 2
-  ){
-
-    return {
-      valid:false,
-      error:"Notas insuficientes"
-    };
-
-  }
-
-
-  const normalized =
-    inputNotes
-      .map(normalizeNote)
-      .filter(Boolean);
-
-
-  if(
-    normalized.length < 2
-  ){
-
-    return {
-      valid:false,
-      error:"Notas inválidas"
-    };
-
-  }
-
-
-  const unique =
-    [...new Set(normalized)];
-
-
-  const inputIndexes =
-    unique
-      .map(noteIndex);
-
-
-  const candidates = [];
-
-
-  for(
-    let rootIndex = 0;
-    rootIndex < NOTES.length;
-    rootIndex++
-  ){
-
-    for(
-      const [
-        quality,
-        intervals
-      ]
-      of Object.entries(
-        CHORD_TYPES
-      )
-    ){
-
-      /*
-        Evita aliases duplicados
-      */
-
-      if(
-        [
-          "M",
-          "MAJ",
-          "MIN",
-          "+"
-        ].includes(quality)
-      ){
-
-        continue;
-
-      }
-
-
-      const expected =
-        [
-          ...new Set(
-            intervals.map(
-              interval =>
-                (
-                  rootIndex +
-                  interval
-                ) % 12
-            )
-          )
-        ];
-
-
-      const matched =
-        expected.filter(
-          pc =>
-            inputIndexes.includes(pc)
-        );
-
-
-      const missing =
-        expected.filter(
-          pc =>
-            !inputIndexes.includes(pc)
-        );
-
-
-      const extra =
-        inputIndexes.filter(
-          pc =>
-            !expected.includes(pc)
-        );
-
-
-      const coverage =
-        matched.length /
-        expected.length;
-
-
-      const precision =
-        matched.length /
-        inputIndexes.length;
-
-
-      /*
-        Score básico
-      */
-
-      let score =
-        coverage * 0.62
-        +
-        precision * 0.38;
-
-
-      /*
-        Penaliza notas extras
-      */
-
-      score -=
-        extra.length * 0.08;
-
-
-      /*
-        Penaliza notas faltando
-      */
-
-      score -=
-        missing.length * 0.06;
-
-
-      /*
-        Favorece acordes mais simples
-        quando dois resultados forem
-        muito parecidos
-      */
-
-      score -=
-        Math.max(
-          0,
-          expected.length - 4
-        )
-        *
-        0.015;
-
-
-      candidates.push({
-
-        root:
-          NOTES[rootIndex],
-
-        quality,
-
-        expected,
-
-        matched,
-
-        missing,
-
-        extra,
-
-        score
-
-      });
-
-    }
-
-  }
-
-
-  candidates.sort(
-    (a,b) =>
-      b.score -
-      a.score
-  );
-
-
-  const best =
-    candidates[0];
-
-
-  if(
-    !best
-    ||
-    best.score < 0.45
-  ){
-
-    return {
-      valid:false,
-      error:"Nenhum acorde confiável encontrado"
-    };
-
-  }
-
-
-  let symbol =
-    best.root
-    +
-    qualityToSymbol(
-      best.quality
-    );
-
-
-  /*
-    Primeira nota recebida = baixo
-  */
-
-  const bass =
-    normalized[0];
-
-
-  if(
-    bass !== best.root
-    &&
-    best.expected.includes(
-      noteIndex(bass)
-    )
-  ){
-
-    symbol +=
-      "/" + bass;
-
-  }
-
-
-  return {
-
-    valid:true,
-
-    chord:
-      symbol,
-
-    root:
-      best.root,
-
-    bass,
-
-    notes:
-      unique,
-
-    expectedNotes:
-      best.expected.map(
-        index =>
-          NOTES[index]
-      ),
-
-    matchedNotes:
-      best.matched.map(
-        index =>
-          NOTES[index]
-      ),
-
-    missingNotes:
-      best.missing.map(
-        index =>
-          NOTES[index]
-      ),
-
-    extraNotes:
-      best.extra.map(
-        index =>
-          NOTES[index]
-      ),
-
-    confidence:
-      Math.max(
-        0,
-        Math.min(
-          1,
-          Number(
-            best.score.toFixed(3)
-          )
-        )
-      ),
-
-    alternatives:
-      candidates
-        .slice(1,5)
-        .map(
-          item => ({
-
-            chord:
-              item.root
-              +
-              qualityToSymbol(
-                item.quality
-              ),
-
-            confidence:
-              Math.max(
-                0,
-                Math.min(
-                  1,
-                  Number(
-                    item.score.toFixed(3)
-                  )
-                )
-              )
-
-          })
-        )
-
-  };
-
-}
-
-
-/* =========================================
-   QUALIDADE -> SÍMBOLO
-========================================= */
-
-function qualityToSymbol(
-  quality
-){
-
-  const map = {
-
-    "":
-      "",
-
-    "M7":
-      "m7",
-
-    "MIN7":
-      "m7",
-
-    "7":
-      "7",
-
-    "MAJ7":
-      "maj7",
-
-    "MMAJ7":
-      "mMaj7",
-
-    "6":
-      "6",
-
-    "M6":
-      "m6",
-
-    "9":
-      "9",
-
-    "MAJ9":
-      "maj9",
-
-    "M9":
-      "m9",
-
-    "11":
-      "11",
-
-    "M11":
-      "m11",
-
-    "13":
-      "13",
-
-    "M13":
-      "m13",
-
-    "SUS2":
-      "sus2",
-
-    "SUS4":
-      "sus4",
-
-    "DIM":
-      "dim",
-
-    "DIM7":
-      "dim7",
-
-    "M7B5":
-      "m7b5",
-
-    "AUG":
-      "aug",
-
-    "ADD9":
-      "add9",
-
-    "MADD9":
-      "madd9",
-
-    "7SUS4":
-      "7sus4",
-
-    "7B5":
-      "7b5",
-
-    "7#5":
-      "7#5",
-
-    "7B9":
-      "7b9",
-
-    "7#9":
-      "7#9",
-
-    "MAJ7#11":
-      "maj7#11"
-
-  };
-
-
-  return (
-    map[quality]
-    ??
-    quality.toLowerCase()
-  );
-
-}
 /* =========================================
    DETECTAR TIMELINE DE ACORDES
 ========================================= */
@@ -1251,11 +1573,15 @@ export function detectChordTimeline(
 ){
 
   if(
-    !Array.isArray(frames)
+    !Array.isArray(
+      frames
+    )
     ||
     frames.length === 0
   ){
+
     return [];
+
   }
 
 
@@ -1265,13 +1591,19 @@ export function detectChordTimeline(
         frame => {
 
           const time =
-            Number(frame.time);
+            Number(
+              frame.time
+            );
 
 
           if(
-            !Number.isFinite(time)
+            !Number.isFinite(
+              time
+            )
           ){
+
             return null;
+
           }
 
 
@@ -1282,8 +1614,11 @@ export function detectChordTimeline(
 
 
           return {
+
             time,
+
             detection
+
           };
 
         }
@@ -1291,18 +1626,80 @@ export function detectChordTimeline(
       .filter(Boolean)
       .sort(
         (a,b) =>
-          a.time - b.time
+          a.time
+          -
+          b.time
       );
 
 
   if(
     normalizedFrames.length === 0
   ){
+
     return [];
+
   }
 
 
   const rawSegments = [];
+
+
+  /*
+    Estima o tamanho do último frame
+    usando a distância temporal média.
+  */
+
+  let defaultStep = 1;
+
+
+  if(
+    normalizedFrames.length >= 2
+  ){
+
+    const diffs = [];
+
+
+    for(
+      let i = 1;
+      i < normalizedFrames.length;
+      i++
+    ){
+
+      const diff =
+        normalizedFrames[i].time
+        -
+        normalizedFrames[i - 1].time;
+
+
+      if(
+        diff > 0
+      ){
+
+        diffs.push(
+          diff
+        );
+
+      }
+
+    }
+
+
+    if(
+      diffs.length > 0
+    ){
+
+      defaultStep =
+        diffs.reduce(
+          (sum,value) =>
+            sum + value,
+          0
+        )
+        /
+        diffs.length;
+
+    }
+
+  }
 
 
   for(
@@ -1314,16 +1711,26 @@ export function detectChordTimeline(
     const current =
       normalizedFrames[i];
 
+
     const next =
-      normalizedFrames[i + 1];
+      normalizedFrames[
+        i + 1
+      ];
+
 
     const start =
       current.time;
 
+
     const end =
       next
-      ? next.time
-      : start + 1;
+      ?
+      next.time
+      :
+      start
+      +
+      defaultStep;
+
 
     const detection =
       current.detection;
@@ -1337,18 +1744,24 @@ export function detectChordTimeline(
 
       chord:
         detection.valid
-        ? detection.chord
-        : "N",
+        ?
+        detection.chord
+        :
+        "N",
 
       notes:
         detection.valid
-        ? detection.expectedNotes
-        : [],
+        ?
+        detection.expectedNotes
+        :
+        [],
 
       confidence:
         detection.valid
-        ? detection.confidence
-        : 0
+        ?
+        detection.confidence
+        :
+        0
 
     });
 
@@ -1356,15 +1769,16 @@ export function detectChordTimeline(
 
 
   /*
-    Junta blocos consecutivos
-    que possuem o mesmo acorde.
+    Junta frames consecutivos
+    que já têm o mesmo acorde.
   */
 
   const merged = [];
 
 
   for(
-    const segment of rawSegments
+    const segment
+    of rawSegments
   ){
 
     const previous =
@@ -1380,21 +1794,57 @@ export function detectChordTimeline(
       segment.chord
     ){
 
+      const previousDuration =
+        previous.end
+        -
+        previous.start;
+
+
+      const currentDuration =
+        segment.end
+        -
+        segment.start;
+
+
       previous.end =
         segment.end;
 
 
-      previous.confidence =
-        Number(
-          (
+      const totalDuration =
+        previousDuration
+        +
+        currentDuration;
+
+
+      if(
+        totalDuration > 0
+      ){
+
+        previous.confidence =
+          Number(
             (
-              previous.confidence
+              (
+                (
+                  previous.confidence || 0
+                )
+                *
+                previousDuration
+              )
               +
-              segment.confidence
+              (
+                (
+                  segment.confidence || 0
+                )
+                *
+                currentDuration
+              )
             )
-            / 2
-          ).toFixed(3)
-        );
+            /
+            totalDuration
+          )
+          .toFixed(3);
+
+      }
 
     }
 
@@ -1412,8 +1862,10 @@ export function detectChordTimeline(
   return merged;
 
 }
+
+
 /* =========================================
-   ESTABILIZAR TIMELINE DE ACORDES
+   ESTABILIZAR TIMELINE
 ========================================= */
 
 export function stabilizeChordTimeline(
@@ -1422,40 +1874,56 @@ export function stabilizeChordTimeline(
 ){
 
   if(
-    !Array.isArray(timeline)
+    !Array.isArray(
+      timeline
+    )
     ||
     timeline.length === 0
   ){
+
     return [];
+
   }
 
 
   const minDuration =
     Number.isFinite(
-      options.minDuration
+      Number(
+        options.minDuration
+      )
     )
     ?
-    options.minDuration
+    Number(
+      options.minDuration
+    )
     :
     0.55;
 
 
   const mergeGap =
     Number.isFinite(
-      options.mergeGap
+      Number(
+        options.mergeGap
+      )
     )
     ?
-    options.mergeGap
+    Number(
+      options.mergeGap
+    )
     :
     0.20;
 
 
   const confidenceThreshold =
     Number.isFinite(
-      options.confidenceThreshold
+      Number(
+        options.confidenceThreshold
+      )
     )
     ?
-    options.confidenceThreshold
+    Number(
+      options.confidenceThreshold
+    )
     :
     0.48;
 
@@ -1482,7 +1950,8 @@ export function stabilizeChordTimeline(
       )
       .sort(
         (a,b) =>
-          a.start -
+          a.start
+          -
           b.start
       );
 
@@ -1490,12 +1959,14 @@ export function stabilizeChordTimeline(
   if(
     segments.length === 0
   ){
+
     return [];
+
   }
 
 
   /* =====================================
-     1. REMOVER ACORDES DE BAIXA CONFIANÇA
+     1. BAIXA CONFIANÇA -> N
   ===================================== */
 
   segments =
@@ -1503,15 +1974,26 @@ export function stabilizeChordTimeline(
       segment => {
 
         if(
-          segment.confidence != null
+          segment.chord !== "N"
+          &&
+          Number.isFinite(
+            segment.confidence
+          )
           &&
           segment.confidence <
           confidenceThreshold
         ){
 
           return {
+
             ...segment,
-            chord:"N"
+
+            chord:
+              "N",
+
+            notes:
+              []
+
           };
 
         }
@@ -1524,8 +2006,7 @@ export function stabilizeChordTimeline(
 
 
   /* =====================================
-     2. PREENCHER BURACOS ENTRE
-        ACORDES IGUAIS
+     2. BURACO CURTO ENTRE ACORDES IGUAIS
   ===================================== */
 
   for(
@@ -1545,19 +2026,20 @@ export function stabilizeChordTimeline(
 
 
     const duration =
-      current.end -
+      current.end
+      -
       current.start;
 
 
     if(
+      duration <=
+      minDuration
+      &&
       previous.chord ===
       next.chord
       &&
       current.chord !==
       previous.chord
-      &&
-      duration <=
-      minDuration
     ){
 
       current.chord =
@@ -1578,10 +2060,7 @@ export function stabilizeChordTimeline(
 
 
   /* =====================================
-     3. ELIMINAR TROCAS MUITO CURTAS
-
-     Se um acorde dura pouco,
-     escolhemos o vizinho mais provável.
+     3. MICROSEGMENTOS
   ===================================== */
 
   for(
@@ -1595,14 +2074,18 @@ export function stabilizeChordTimeline(
 
 
     const duration =
-      current.end -
+      current.end
+      -
       current.start;
 
 
     if(
-      duration >= minDuration
+      duration >=
+      minDuration
     ){
+
       continue;
+
     }
 
 
@@ -1629,6 +2112,10 @@ export function stabilizeChordTimeline(
       next
     ){
 
+      /*
+        Mesmos vizinhos.
+      */
+
       if(
         previous.chord ===
         next.chord
@@ -1640,17 +2127,32 @@ export function stabilizeChordTimeline(
         current.notes =
           previous.notes;
 
+        current.confidence =
+          Math.max(
+            previous.confidence || 0,
+            next.confidence || 0
+          );
+
         continue;
 
       }
 
 
+      /*
+        Caso contrário, usa o
+        vizinho mais confiável.
+      */
+
       const previousConfidence =
-        previous.confidence || 0;
+        previous.confidence
+        ||
+        0;
 
 
       const nextConfidence =
-        next.confidence || 0;
+        next.confidence
+        ||
+        0;
 
 
       if(
@@ -1714,10 +2216,10 @@ export function stabilizeChordTimeline(
 
 
   /* =====================================
-     4. JUNTAR ACORDES IGUAIS
+     4. PRIMEIRO MERGE
   ===================================== */
 
-  const merged = [];
+  let merged = [];
 
 
   for(
@@ -1738,32 +2240,64 @@ export function stabilizeChordTimeline(
       segment.chord
       &&
       (
-        segment.start -
+        segment.start
+        -
         previous.end
       )
       <= mergeGap
     ){
 
+      const previousDuration =
+        previous.end
+        -
+        previous.start;
+
+
+      const currentDuration =
+        segment.end
+        -
+        segment.start;
+
+
+      const totalDuration =
+        previousDuration
+        +
+        currentDuration;
+
+
       previous.end =
         segment.end;
 
 
-      const a =
-        previous.confidence || 0;
+      if(
+        totalDuration > 0
+      ){
 
-      const b =
-        segment.confidence || 0;
-
-
-      previous.confidence =
-        Number(
-          (
-            (a + b)
+        previous.confidence =
+          Number(
+            (
+              (
+                (
+                  previous.confidence || 0
+                )
+                *
+                previousDuration
+              )
+              +
+              (
+                (
+                  segment.confidence || 0
+                )
+                *
+                currentDuration
+              )
+            )
             /
-            2
+            totalDuration
           )
-          .toFixed(3)
-        );
+          .toFixed(3);
+
+      }
 
 
       continue;
@@ -1779,59 +2313,187 @@ export function stabilizeChordTimeline(
 
 
   /* =====================================
-     5. REMOVER "N" MUITO CURTO
+     5. REMOVER MICROSEGMENTOS
+        QUE SURGIRAM APÓS MERGE
   ===================================== */
 
-  for(
-    let i = 1;
-    i < merged.length - 1;
-    i++
+  let changed = true;
+
+  let safety = 0;
+
+
+  while(
+    changed
+    &&
+    safety < 10
   ){
 
-    const current =
-      merged[i];
+    changed = false;
+
+    safety++;
 
 
-    if(
-      current.chord !== "N"
-    ){
-      continue;
-    }
-
-
-    const duration =
-      current.end -
-      current.start;
-
-
-    if(
-      duration >
-      minDuration
-    ){
-      continue;
-    }
-
-
-    const previous =
-      merged[i - 1];
-
-    const next =
-      merged[i + 1];
-
-
-    if(
-      previous.chord ===
-      next.chord
+    for(
+      let i = 0;
+      i < merged.length;
+      i++
     ){
 
-      current.chord =
-        previous.chord;
+      const current =
+        merged[i];
 
-      current.notes =
-        previous.notes;
 
-      current.confidence =
-        previous.confidence;
+      const duration =
+        current.end
+        -
+        current.start;
+
+
+      if(
+        duration >=
+        minDuration
+      ){
+
+        continue;
+
+      }
+
+
+      const previous =
+        i > 0
+        ?
+        merged[i - 1]
+        :
+        null;
+
+
+      const next =
+        i <
+        merged.length - 1
+        ?
+        merged[i + 1]
+        :
+        null;
+
+
+      /*
+        Entre dois acordes iguais.
+      */
+
+      if(
+        previous
+        &&
+        next
+        &&
+        previous.chord ===
+        next.chord
+      ){
+
+        previous.end =
+          next.end;
+
+
+        merged.splice(
+          i,
+          2
+        );
+
+
+        changed = true;
+
+        break;
+
+      }
+
+
+      /*
+        Escolhe o vizinho mais confiável.
+      */
+
+      if(
+        previous
+        &&
+        next
+      ){
+
+        const usePrevious =
+          (
+            previous.confidence || 0
+          )
+          >=
+          (
+            next.confidence || 0
+          );
+
+
+        if(usePrevious){
+
+          previous.end =
+            current.end;
+
+          merged.splice(
+            i,
+            1
+          );
+
+        }
+
+        else{
+
+          next.start =
+            current.start;
+
+          merged.splice(
+            i,
+            1
+          );
+
+        }
+
+
+        changed = true;
+
+        break;
+
+      }
+
+
+      if(previous){
+
+        previous.end =
+          current.end;
+
+
+        merged.splice(
+          i,
+          1
+        );
+
+
+        changed = true;
+
+        break;
+
+      }
+
+
+      if(next){
+
+        next.start =
+          current.start;
+
+
+        merged.splice(
+          i,
+          1
+        );
+
+
+        changed = true;
+
+        break;
+
+      }
 
     }
 
@@ -1839,7 +2501,7 @@ export function stabilizeChordTimeline(
 
 
   /* =====================================
-     6. JUNÇÃO FINAL
+     6. MERGE FINAL
   ===================================== */
 
   const finalTimeline = [];
@@ -1881,12 +2543,16 @@ export function stabilizeChordTimeline(
   return finalTimeline;
 
 }
+
+
 /* =========================================
    EXPORTAR LISTA DE NOTAS
 ========================================= */
 
 export function getNoteNames(){
 
-  return [...NOTES];
+  return [
+    ...NOTES
+  ];
 
 }
