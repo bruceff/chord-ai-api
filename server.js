@@ -375,7 +375,7 @@ async function getYoutubeMetadata(
 
 
 /* =========================================
-   CRIAR TIMELINE DO BAIXO
+   TIMELINE DO BAIXO
 ========================================= */
 
 function createBassTimeline(
@@ -523,7 +523,7 @@ function createBassTimeline(
 
 
 /* =========================================
-   BAIXO DOMINANTE POR REGIÃO DE ACORDE
+   BAIXO POR REGIÃO DE ACORDE
 ========================================= */
 
 function createBassByChordRegion(
@@ -675,7 +675,7 @@ const server =
 
 
       /* =====================================
-         CORS / PREFLIGHT
+         PREFLIGHT
       ===================================== */
 
       if(
@@ -731,7 +731,7 @@ const server =
               "online",
 
             version:
-              "1.4.0",
+              "1.5.0",
 
             audioEngine:
               "v3-bass",
@@ -740,7 +740,7 @@ const server =
               "v9",
 
             reconstructionValidator:
-              "v1",
+              "v2",
 
             bassDiagnostics:
               true
@@ -776,13 +776,13 @@ const server =
               "chord-ai-api",
 
             audioEngine:
-              "v3",
+              "v3-bass",
 
             chordEngine:
               "v9",
 
             reconstructionValidator:
-              "v1",
+              "v2",
 
             bassDetector:
               "online"
@@ -1076,7 +1076,7 @@ const server =
 
 
       /* =====================================
-         DETECTAR ACORDE
+         DETECTAR ACORDE POST
       ===================================== */
 
       if(
@@ -1129,7 +1129,7 @@ const server =
 
 
       /* =====================================
-         DETECT VIA GET
+         DETECTAR ACORDE GET
       ===================================== */
 
       if(
@@ -1305,32 +1305,62 @@ const server =
 
           {
             time:0,
-            notes:["C","E","G","B"]
+            notes:[
+              "C",
+              "E",
+              "G",
+              "B"
+            ]
           },
 
           {
             time:2,
-            notes:["C","E","G","B"]
+            notes:[
+              "C",
+              "E",
+              "G",
+              "B"
+            ]
           },
 
           {
             time:4,
-            notes:["A","C","E","G"]
+            notes:[
+              "A",
+              "C",
+              "E",
+              "G"
+            ]
           },
 
           {
             time:6,
-            notes:["A","C","E","G"]
+            notes:[
+              "A",
+              "C",
+              "E",
+              "G"
+            ]
           },
 
           {
             time:8,
-            notes:["F","A","C","E"]
+            notes:[
+              "F",
+              "A",
+              "C",
+              "E"
+            ]
           },
 
           {
             time:10,
-            notes:["G","B","D","F"]
+            notes:[
+              "G",
+              "B",
+              "D",
+              "F"
+            ]
           }
 
         ];
@@ -1568,6 +1598,10 @@ const server =
           }
 
 
+          /* =================================
+             AUDIO ENGINE
+          ================================= */
+
           const audio =
             await analyzeWavBuffer(
               buffer,
@@ -1595,6 +1629,13 @@ const server =
             );
 
 
+          /* =================================
+             FRAMES COMPLETOS
+
+             v2 mantém todas as features
+             úteis para reconstrução.
+          ================================= */
+
           const analysisFrames =
             audio.frames.map(
               frame => ({
@@ -1608,15 +1649,36 @@ const server =
                 bassChroma:
                   frame.bassChroma,
 
+                bassProfile:
+                  frame.bassProfile,
+
                 bassNote:
-                  frame.bassNote
+                  frame.bassNote,
+
+                bassFullNote:
+                  frame.bassFullNote,
+
+                bassMidi:
+                  frame.bassMidi,
+
+                bassConfidence:
+                  frame.bassConfidence,
+
+                rms:
+                  frame.rms,
+
+                spectralCentroid:
+                  frame.spectralCentroid,
+
+                spectralFlatness:
+                  frame.spectralFlatness
 
               })
             );
 
 
           /* =================================
-             1. DETECÇÃO ORIGINAL
+             1. CHORD ENGINE
           ================================= */
 
           const rawTimeline =
@@ -1644,7 +1706,7 @@ const server =
 
 
           /* =================================
-             2. RECONSTRUCTION VALIDATOR v1
+             2. RECONSTRUCTION VALIDATOR v2
           ================================= */
 
           const validatedTimeline =
@@ -1653,17 +1715,32 @@ const server =
               analysisFrames,
               {
 
-                candidateLimit:
-                  8,
+                detectorWeight:
+                  0.48,
 
-                maxDetectorGap:
-                  0.18,
+                detectorRange:
+                  0.30,
+
+                minFinalAdvantage:
+                  0.035,
 
                 minReconstructionGain:
-                  0.055,
+                  0.025,
 
-                detectorWeight:
-                  0.56
+                bassRescueAdvantage:
+                  0.020,
+
+                boundaryMaxDuration:
+                  0.32,
+
+                boundaryMaxFrames:
+                  2,
+
+                boundaryOwnAdvantage:
+                  0.045,
+
+                boundaryNeighborAdvantage:
+                  0.015
 
               }
             );
@@ -1703,8 +1780,12 @@ const server =
             );
 
 
+          /* =================================
+             LOG DO VALIDATOR
+          ================================= */
+
           console.log(
-            "====== RECONSTRUCTION VALIDATOR ======"
+            "====== RECONSTRUCTION VALIDATOR v2 ======"
           );
 
 
@@ -1715,13 +1796,15 @@ const server =
 
             console.log(
 
-              chord.start
-                .toFixed(2),
+              Number(
+                chord.start
+              ).toFixed(2),
 
               "→",
 
-              chord.end
-                .toFixed(2),
+              Number(
+                chord.end
+              ).toFixed(2),
 
               "| chord:",
 
@@ -1739,6 +1822,12 @@ const server =
               ??
               false,
 
+              "| reason:",
+
+              chord.reconstructionReason
+              ??
+              "-",
+
               "| score:",
 
               chord.reconstruction?.score
@@ -1749,6 +1838,10 @@ const server =
 
           }
 
+
+          /* =================================
+             LOG BASS TIMELINE
+          ================================= */
 
           console.log(
             "====== BASS TIMELINE ======"
@@ -1762,13 +1855,15 @@ const server =
 
             console.log(
 
-              item.start
-                .toFixed(2),
+              Number(
+                item.start
+              ).toFixed(2),
 
               "→",
 
-              item.end
-                .toFixed(2),
+              Number(
+                item.end
+              ).toFixed(2),
 
               "| bass:",
 
@@ -1778,6 +1873,10 @@ const server =
 
           }
 
+
+          /* =================================
+             LOG BASS BY CHORD
+          ================================= */
 
           console.log(
             "====== BASS BY CHORD ======"
@@ -1791,13 +1890,15 @@ const server =
 
             console.log(
 
-              item.start
-                .toFixed(2),
+              Number(
+                item.start
+              ).toFixed(2),
 
               "→",
 
-              item.end
-                .toFixed(2),
+              Number(
+                item.end
+              ).toFixed(2),
 
               "| chord:",
 
@@ -1838,7 +1939,7 @@ const server =
                 "v9",
 
               reconstructionValidator:
-                "v1",
+                "v2",
 
               audio:{
 
@@ -1875,6 +1976,9 @@ const server =
 
                 reconstructionEnabled:
                   true,
+
+                reconstructionVersion:
+                  "v2",
 
                 bassTimeline,
 
@@ -1966,15 +2070,15 @@ server.listen(
     );
 
     console.log(
-      "Audio Engine v3"
+      "Audio Engine: v3-bass"
     );
 
     console.log(
-      "Chord Engine v9"
+      "Chord Engine: v9"
     );
 
     console.log(
-      "Reconstruction Validator v1"
+      "Reconstruction Validator: v2"
     );
 
     console.log(
