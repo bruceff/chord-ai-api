@@ -5,7 +5,10 @@
   "main": "server.js",
   "type": "module",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "benchmark": "node benchmark-runner.js",
+    "benchmark:save": "node benchmark-runner.js --save-baseline",
+    "benchmark:strict": "node benchmark-runner.js --strict"
   },
   "engines": {
     "node": ">=18"
