@@ -1,16 +1,16 @@
 /* =========================================
-   CHORD AI — CHORD ENGINE v10
+   CHORD AI — CHORD ENGINE v11
 
    Base:
-   - v9
+   - v10
 
-   Novidades:
-   - conservative bass correction
-   - ambiguity resolver
-   - m7b5 correction
-   - dominant vs diminished correction
-   - bass cannot dominate harmonic score
-   - realistic confidence
+   Objetivos:
+   - manter os 7 acordes corretos
+   - corrigir ambiguidades de root
+     deslocadas em 1 semitom
+   - foco especial em m7b5
+   - baixo continua conservador
+   - confiança continua realista
 ========================================= */
 
 
@@ -236,6 +236,7 @@ function normalizeVector12(
           const n =
             Number(value);
 
+
           return Number.isFinite(n)
             ?
             Math.max(0,n)
@@ -276,6 +277,25 @@ function normalizeChroma(
 
   return normalizeVector12(
     chroma
+  );
+
+}
+
+
+function pitchDistance(
+  a,
+  b
+){
+
+  const difference =
+    Math.abs(
+      a - b
+    );
+
+
+  return Math.min(
+    difference,
+    12 - difference
   );
 
 }
@@ -452,8 +472,7 @@ function normalizeQuality(
     return "AUG";
 
 
-  return value
-    .toUpperCase();
+  return value.toUpperCase();
 
 }
 
@@ -573,9 +592,7 @@ export function transposeNote(
     (
       index
       +
-      Number(
-        semitones
-      )
+      Number(semitones)
     ) % 12;
 
 
@@ -926,8 +943,6 @@ function scoreChordTemplate(
     weakest * 0.07;
 
 
-  /* ROOT PRESENTE */
-
   if(
     rootEnergy >= 0.50
   ){
@@ -937,8 +952,6 @@ function scoreChordTemplate(
 
   }
 
-
-  /* ROOT AUSENTE */
 
   if(
     rootEnergy < 0.12
@@ -950,8 +963,6 @@ function scoreChordTemplate(
   }
 
 
-  /* ENERGIA EXTERNA */
-
   score -=
     (
       outsideEnergy / 12
@@ -959,8 +970,6 @@ function scoreChordTemplate(
     *
     0.13;
 
-
-  /* NOTAS ESTRUTURAIS FRACAS */
 
   const weakCount =
     structural.filter(
@@ -1014,7 +1023,7 @@ function scoreChordTemplate(
 
 
   /* =====================================
-     TÉTRADE
+     TÉTRADES
   ===================================== */
 
   if(
@@ -1125,7 +1134,7 @@ function scoreChordTemplate(
 
 
 /* =========================================
-   CRIAR CANDIDATOS BASE
+   CANDIDATOS BASE
 ========================================= */
 
 function buildBaseCandidates(
@@ -1223,7 +1232,7 @@ function buildBaseCandidates(
 
 
 /* =========================================
-   MESMO CONJUNTO DE NOTAS
+   MESMO CONJUNTO
 ========================================= */
 
 function samePitchSet(
@@ -1239,14 +1248,7 @@ function samePitchSet(
     !Array.isArray(a.notes)
     ||
     !Array.isArray(b.notes)
-  ){
-
-    return false;
-
-  }
-
-
-  if(
+    ||
     a.notes.length !==
     b.notes.length
   ){
@@ -1276,7 +1278,7 @@ function samePitchSet(
 
 
 /* =========================================
-   BAIXO CONSERVADOR
+   INFLUÊNCIA LEVE DO BAIXO
 ========================================= */
 
 function applyConservativeBass(
@@ -1327,11 +1329,6 @@ function applyConservativeBass(
     sorted[0].score;
 
 
-  /*
-    Só candidatos próximos recebem
-    qualquer influência do baixo.
-  */
-
   const close =
     sorted.filter(
       candidate =>
@@ -1361,7 +1358,7 @@ function applyConservativeBass(
     ){
 
       bonus +=
-        0.035;
+        0.032;
 
     }
 
@@ -1375,7 +1372,7 @@ function applyConservativeBass(
           candidate.rootIndex
         ]
         *
-        0.012;
+        0.010;
 
     }
 
@@ -1400,14 +1397,9 @@ function applyConservativeBass(
 
 
 /* =========================================
-   AMBIGUIDADE POR MESMAS NOTAS
+   MESMAS PITCH CLASSES
 
-   Ex:
-   Am7 = A C E G
-   C6  = C E G A
-
-   Só usamos o baixo se ele realmente
-   aponta para uma das raízes candidatas.
+   Am7 vs C6 etc.
 ========================================= */
 
 function resolveEquivalentPitchSets(
@@ -1462,15 +1454,12 @@ function resolveEquivalentPitchSets(
       sorted[i];
 
 
-    const difference =
+    if(
       leader.score
       -
-      alternative.score;
-
-
-    if(
-      difference >
-      0.075
+      alternative.score
+      >
+      0.07
     ){
 
       continue;
@@ -1496,7 +1485,7 @@ function resolveEquivalentPitchSets(
     ){
 
       alternative.score +=
-        0.045;
+        0.04;
 
     }
 
@@ -1517,16 +1506,261 @@ function resolveEquivalentPitchSets(
 
 
 /* =========================================
-   M7B5 CORRECTION
+   NOVO v11:
 
-   Caso atual:
-   A#maj7 vs Bm7b5
+   SEMITONE ROOT AMBIGUITY
 
-   Aqui sabemos que o Bass Detector
-   encontrou B corretamente.
+   Situação típica:
 
-   Mas a correção continua conservadora:
-   o m7b5 precisa já estar próximo.
+   A#maj7 = A# D F A
+   Bm7b5  = B  D F A
+
+   Há apenas uma diferença de semitom
+   na possível fundamental.
+
+   Só corrige quando:
+
+   - candidato m7b5 está próximo
+   - bassNote = raiz do m7b5
+   - roots estão separadas por 1 semitom
+   - root m7b5 tem energia suficiente
+   - as demais notas coincidem muito
+========================================= */
+
+function resolveSemitoneRootAmbiguity(
+  candidates,
+  bassNote,
+  chroma
+){
+
+  if(
+    !Array.isArray(candidates)
+    ||
+    candidates.length < 2
+  ){
+
+    return candidates;
+
+  }
+
+
+  const bassIndex =
+    noteIndex(
+      bassNote
+    );
+
+
+  if(
+    bassIndex < 0
+  ){
+
+    return candidates;
+
+  }
+
+
+  const normalized =
+    normalizeChroma(
+      chroma
+    );
+
+
+  if(!normalized){
+
+    return candidates;
+
+  }
+
+
+  const sorted =
+    [...candidates];
+
+
+  const leader =
+    sorted[0];
+
+
+  const leaderSet =
+    new Set(
+      leader.notes
+    );
+
+
+  for(
+    const alternative
+    of sorted
+  ){
+
+    if(
+      alternative.quality !==
+      "MIN7B5"
+    ){
+
+      continue;
+
+    }
+
+
+    /*
+      Bass precisa apontar
+      diretamente para a root.
+    */
+
+    if(
+      alternative.rootIndex !==
+      bassIndex
+    ){
+
+      continue;
+
+    }
+
+
+    /*
+      Diferença de root precisa
+      ser exatamente 1 semitom.
+    */
+
+    if(
+      pitchDistance(
+        leader.rootIndex,
+        alternative.rootIndex
+      )
+      !==
+      1
+    ){
+
+      continue;
+
+    }
+
+
+    /*
+      O candidato precisa estar
+      harmonicamente próximo.
+    */
+
+    const scoreDifference =
+      leader.score
+      -
+      alternative.score;
+
+
+    if(
+      scoreDifference >
+      0.145
+    ){
+
+      continue;
+
+    }
+
+
+    /*
+      Energia real na root alternativa.
+    */
+
+    const alternativeRootEnergy =
+      normalized[
+        alternative.rootIndex
+      ];
+
+
+    if(
+      alternativeRootEnergy <
+      0.20
+    ){
+
+      continue;
+
+    }
+
+
+    /*
+      Calcula quantas notas as duas
+      hipóteses compartilham.
+    */
+
+    let sharedNotes = 0;
+
+
+    for(
+      const note
+      of alternative.notes
+    ){
+
+      if(
+        leaderSet.has(
+          note
+        )
+      ){
+
+        sharedNotes++;
+
+      }
+
+    }
+
+
+    /*
+      Queremos pelo menos 3 notas
+      compartilhadas.
+
+      Ex:
+      A#maj7 / Bm7b5
+      compartilham D F A.
+    */
+
+    if(
+      sharedNotes < 3
+    ){
+
+      continue;
+
+    }
+
+
+    /*
+      Quanto mais forte a root
+      detectada, maior o bônus.
+
+      Continua limitado para não
+      repetir o problema do v8.
+    */
+
+    const rootBonus =
+      clamp(
+        alternativeRootEnergy
+        *
+        0.075,
+        0.025,
+        0.075
+      );
+
+
+    alternative.score +=
+      0.070
+      +
+      rootBonus;
+
+  }
+
+
+  sorted.sort(
+    (a,b) =>
+      b.score
+      -
+      a.score
+  );
+
+
+  return sorted;
+
+}
+
+
+/* =========================================
+   HALF DIMINISHED NORMAL
 ========================================= */
 
 function resolveHalfDiminished(
@@ -1608,18 +1842,13 @@ function resolveHalfDiminished(
 
     if(
       difference >
-      0.12
+      0.11
     ){
 
       continue;
 
     }
 
-
-    /*
-      Também exigimos alguma energia
-      real na root dentro do chroma.
-    */
 
     const rootEnergy =
       normalized
@@ -1633,7 +1862,7 @@ function resolveHalfDiminished(
 
     if(
       rootEnergy <
-      0.22
+      0.20
     ){
 
       continue;
@@ -1642,7 +1871,7 @@ function resolveHalfDiminished(
 
 
     candidate.score +=
-      0.085;
+      0.055;
 
   }
 
@@ -1661,16 +1890,7 @@ function resolveHalfDiminished(
 
 
 /* =========================================
-   DOMINANTE vs DIMINUTO
-
-   Ex:
-   E7 = E G# B D
-   G#dim/Bdim/Ddim podem aparecer.
-
-   Só corrige se:
-   - E7 já está perto
-   - E tem energia
-   - baixo aponta para E
+   DOMINANTE VS DIMINUTO
 ========================================= */
 
 function resolveDominantVsDiminished(
@@ -1767,7 +1987,7 @@ function resolveDominantVsDiminished(
     ){
 
       candidate.score +=
-        0.045;
+        0.040;
 
     }
 
@@ -1788,7 +2008,7 @@ function resolveDominantVsDiminished(
 
 
 /* =========================================
-   CONFIANÇA REALISTA
+   CONFIANÇA
 ========================================= */
 
 function calculateConfidence(
@@ -1882,15 +2102,6 @@ export function detectChordCandidatesFromChroma(
     );
 
 
-  /*
-    Ordem importante.
-
-    1. influência leve do baixo
-    2. mesmas notas
-    3. m7b5
-    4. dominante/diminuto
-  */
-
   candidates =
     applyConservativeBass(
       candidates,
@@ -1903,6 +2114,18 @@ export function detectChordCandidatesFromChroma(
     resolveEquivalentPitchSets(
       candidates,
       options.bassNote
+    );
+
+
+  /*
+    NOVO v11.
+  */
+
+  candidates =
+    resolveSemitoneRootAmbiguity(
+      candidates,
+      options.bassNote,
+      chroma
     );
 
 
@@ -1993,8 +2216,7 @@ export function detectChordCandidatesFromChroma(
 
           confidence:
             Number(
-              confidence
-                .toFixed(3)
+              confidence.toFixed(3)
             )
 
         };
@@ -2165,7 +2387,7 @@ export function detectChord(
 
 
 /* =========================================
-   DECODER TEMPORAL v10
+   DECODER TEMPORAL v11
 ========================================= */
 
 export function decodeChordSequenceFromChroma(
@@ -2463,11 +2685,8 @@ export function decodeChordSequenceFromChroma(
 
 
         /*
-          Bass recebe bônus minúsculo
-          na transição.
-
-          Ele nunca pode ressuscitar
-          candidato harmonicamente ruim.
+          Bass continua tendo influência
+          temporal mínima.
         */
 
         if(
