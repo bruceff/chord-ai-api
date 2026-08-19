@@ -3,14 +3,36 @@ import WavDecoder from "wav-decoder";
 
 
 /* =========================================
-   CHORD AI — AUDIO ENGINE v4
+   CHORD AI — AUDIO ENGINE v5
 
-   foco:
-   - chroma completo
-   - bass detector 2.0
-   - correção de harmônicos
-   - bass confidence
-   - persistência temporal
+   OBJETIVO:
+
+   WAV
+    ↓
+   PCM MONO
+    ↓
+   CHROMA COMPLETO
+    +
+   BASS NOTE DETECTOR v3
+    ↓
+   nota grave real:
+   D3 / G3 / A3 / B2...
+    ↓
+   pitch class:
+   D / G / A / B
+    ↓
+   Chord Engine
+
+   Melhorias:
+
+   - busca grave ampliada até B3
+   - não soma oitavas prematuramente
+   - detecta primeiro altura real
+   - usa pico espectral local
+   - usa suporte harmônico
+   - prefere o menor pico forte real
+   - bassConfidence real
+   - agregação temporal do baixo
 ========================================= */
 
 
@@ -32,6 +54,36 @@ const NOTE_NAMES = [
   "A#",
   "B"
 ];
+
+
+/* =========================================
+   CONFIGURAÇÃO DO BASS DETECTOR
+========================================= */
+
+/*
+   MIDI:
+
+   36 = C2
+   47 = B2
+   48 = C3
+   50 = D3
+   52 = E3
+   53 = F3
+   55 = G3
+   57 = A3
+   59 = B3
+
+   IMPORTANTE:
+
+   O detector anterior terminava
+   aproximadamente em E3.
+
+   Agora cobrimos até B3.
+*/
+
+const BASS_MIN_MIDI = 36;
+
+const BASS_MAX_MIDI = 59;
 
 
 /* =========================================
@@ -90,7 +142,9 @@ function median(values){
       sorted[middle - 1]
       +
       sorted[middle]
-    ) / 2;
+    )
+    /
+    2;
 
   }
 
@@ -101,7 +155,81 @@ function median(values){
 
 
 /* =========================================
-   NORMALIZAR VETOR DE 12
+   NORMALIZAR VETOR
+========================================= */
+
+function normalizeVector(
+  values
+){
+
+  if(
+    !values
+    ||
+    typeof values.length !== "number"
+    ||
+    values.length === 0
+  ){
+
+    return null;
+
+  }
+
+
+  const array =
+    Array.from(values)
+      .map(
+        value => {
+
+          const n =
+            Number(value);
+
+
+          if(
+            !Number.isFinite(n)
+          ){
+
+            return 0;
+
+          }
+
+
+          return Math.max(
+            0,
+            n
+          );
+
+        }
+      );
+
+
+  const max =
+    Math.max(
+      ...array
+    );
+
+
+  if(
+    max <= 0
+  ){
+
+    return new Array(
+      array.length
+    )
+    .fill(0);
+
+  }
+
+
+  return array.map(
+    value =>
+      value / max
+  );
+
+}
+
+
+/* =========================================
+   NORMALIZAR 12
 ========================================= */
 
 function normalize12(
@@ -121,50 +249,15 @@ function normalize12(
   }
 
 
-  const normalized =
-    Array.from(values)
-      .map(
-        value => {
-
-          const n =
-            Number(value);
-
-          return Number.isFinite(n)
-            ?
-            Math.max(0,n)
-            :
-            0;
-
-        }
-      );
-
-
-  const max =
-    Math.max(
-      ...normalized
-    );
-
-
-  if(
-    max <= 0
-  ){
-
-    return new Array(12)
-      .fill(0);
-
-  }
-
-
-  return normalized.map(
-    value =>
-      value / max
+  return normalizeVector(
+    values
   );
 
 }
 
 
 /* =========================================
-   NOTA MIDI -> FREQUÊNCIA
+   MIDI -> FREQUÊNCIA
 ========================================= */
 
 function midiToFrequency(
@@ -188,7 +281,7 @@ function midiToFrequency(
 
 
 /* =========================================
-   FREQUÊNCIA -> PITCH CLASS
+   MIDI -> PITCH CLASS
 ========================================= */
 
 function midiToPitchClass(
@@ -199,13 +292,54 @@ function midiToPitchClass(
     midi % 12
     +
     12
-  ) % 12;
+  )
+  %
+  12;
+
+}
+
+
+/* =========================================
+   MIDI -> NOME COMPLETO
+
+   Ex:
+   50 -> D3
+========================================= */
+
+function midiToFullNoteName(
+  midi
+){
+
+  const pitchClass =
+    midiToPitchClass(
+      midi
+    );
+
+
+  const octave =
+    Math.floor(
+      midi / 12
+    )
+    -
+    1;
+
+
+  return (
+    NOTE_NAMES[
+      pitchClass
+    ]
+    +
+    octave
+  );
 
 }
 
 
 /* =========================================
    GOERTZEL
+
+   Mede energia próxima de uma
+   frequência específica.
 ========================================= */
 
 function goertzelPower(
@@ -266,7 +400,14 @@ function goertzelPower(
     i++
   ){
 
-    const hann =
+    /*
+      Hann window.
+
+      Reduz vazamento espectral
+      entre notas vizinhas.
+    */
+
+    const window =
       0.5
       -
       0.5
@@ -288,7 +429,7 @@ function goertzelPower(
     const value =
       samples[i]
       *
-      hann;
+      window;
 
 
     s0 =
@@ -303,6 +444,7 @@ function goertzelPower(
 
     s2 =
       s1;
+
 
     s1 =
       s0;
@@ -331,10 +473,15 @@ function goertzelPower(
 
 
 /* =========================================
-   ENERGIA EM TORNO DE UMA FREQUÊNCIA
+   ENERGIA LOCAL
 
-   Avalia ligeiramente abaixo, centro e
-   acima para tolerar afinação/desvio.
+   Não analisamos apenas a frequência
+   matemática perfeita.
+
+   Isso tolera:
+   - afinação
+   - instrumentos reais
+   - pequenas diferenças de pitch
 ========================================= */
 
 function localFrequencyEnergy(
@@ -344,9 +491,17 @@ function localFrequencyEnergy(
 ){
 
   const ratios = [
-    0.985,
-    1.0,
-    1.015
+
+    0.988,
+
+    0.994,
+
+    1.000,
+
+    1.006,
+
+    1.012
+
   ];
 
 
@@ -358,13 +513,24 @@ function localFrequencyEnergy(
     of ratios
   ){
 
+    const power =
+      goertzelPower(
+        samples,
+        sampleRate,
+        frequency * ratio
+      );
+
+
+    /*
+      Compressão logarítmica.
+
+      Evita que um único pico
+      gigantesco domine tudo.
+    */
+
     total +=
       Math.log1p(
-        goertzelPower(
-          samples,
-          sampleRate,
-          frequency * ratio
-        )
+        power
       );
 
   }
@@ -378,26 +544,34 @@ function localFrequencyEnergy(
 
 
 /* =========================================
-   BASS SPECTRUM CROMÁTICO
+   PERFIL GRAVE BRUTO
 
-   MIDI 24 = C1
-   MIDI 52 = E3
+   Aqui ainda NÃO reduzimos para
+   pitch classes.
 
-   cobrimos uma faixa suficientemente
-   grave para baixo/fundamental.
+   Teremos:
+
+   C2
+   C#2
+   D2
+   ...
+   B2
+   C3
+   ...
+   B3
 ========================================= */
 
-function analyzeBassSpectrum(
+function extractBassProfile(
   samples,
   sampleRate
 ){
 
-  const bins = [];
+  const raw = [];
 
 
   for(
-    let midi = 24;
-    midi <= 52;
+    let midi = BASS_MIN_MIDI;
+    midi <= BASS_MAX_MIDI;
     midi++
   ){
 
@@ -407,7 +581,7 @@ function analyzeBassSpectrum(
       );
 
 
-    const energy =
+    const directEnergy =
       localFrequencyEnergy(
         samples,
         sampleRate,
@@ -415,7 +589,7 @@ function analyzeBassSpectrum(
       );
 
 
-    bins.push({
+    raw.push({
 
       midi,
 
@@ -426,215 +600,777 @@ function analyzeBassSpectrum(
           midi
         ),
 
-      energy
+      fullNote:
+        midiToFullNoteName(
+          midi
+        ),
+
+      directEnergy
 
     });
 
   }
 
 
-  return bins;
+  const normalized =
+    normalizeVector(
 
-}
+      raw.map(
+        item =>
+          item.directEnergy
+      )
 
-
-/* =========================================
-   CORREÇÃO DE HARMÔNICOS
-
-   Se uma nota aguda parece forte apenas
-   porque é harmônico de uma nota mais
-   grave, reduzimos sua força como root.
-========================================= */
-
-function applyHarmonicCorrection(
-  bins
-){
-
-  const corrected =
-    bins.map(
-      bin => ({
-        ...bin,
-        correctedEnergy:
-          bin.energy
-      })
     );
 
 
   for(
     let i = 0;
-    i < corrected.length;
+    i < raw.length;
     i++
   ){
 
-    const current =
-      corrected[i];
-
-
-    /*
-      Procura aproximadamente:
-      2x frequência = oitava
-      3x frequência = quinta/12ª
-    */
-
-    for(
-      let j = 0;
-      j < corrected.length;
-      j++
-    ){
-
-      if(i === j)
-        continue;
-
-
-      const lower =
-        corrected[j];
-
-
-      if(
-        lower.frequency >=
-        current.frequency
-      ){
-
-        continue;
-
-      }
-
-
-      const ratio =
-        current.frequency
-        /
-        lower.frequency;
-
-
-      let penalty = 0;
-
-
-      if(
-        Math.abs(
-          ratio - 2
-        )
-        <
-        0.04
-      ){
-
-        penalty =
-          lower.energy
-          *
-          0.24;
-
-      }
-
-
-      else if(
-        Math.abs(
-          ratio - 3
-        )
-        <
-        0.06
-      ){
-
-        penalty =
-          lower.energy
-          *
-          0.12;
-
-      }
-
-
-      current.correctedEnergy -=
-        penalty;
-
-    }
-
-
-    current.correctedEnergy =
-      Math.max(
-        0,
-        current.correctedEnergy
-      );
+    raw[i].directNormalized =
+      normalized
+      ?
+      normalized[i]
+      :
+      0;
 
   }
 
 
-  return corrected;
+  return raw;
 
 }
 
 
 /* =========================================
-   BASS CHROMA v4
+   SUPORTE HARMÔNICO
+
+   Uma fundamental real pode ser
+   apoiada por:
+
+   f
+   2f
+   3f
+
+   Mas os harmônicos NÃO podem
+   substituir a fundamental.
 ========================================= */
 
-export function extractBassChroma(
+function calculateHarmonicSupport(
+  samples,
+  sampleRate,
+  frequency
+){
+
+  const second =
+    frequency * 2;
+
+
+  const third =
+    frequency * 3;
+
+
+  let support = 0;
+
+
+  if(
+    second <
+    sampleRate / 2
+  ){
+
+    support +=
+      localFrequencyEnergy(
+        samples,
+        sampleRate,
+        second
+      )
+      *
+      0.13;
+
+  }
+
+
+  if(
+    third <
+    sampleRate / 2
+  ){
+
+    support +=
+      localFrequencyEnergy(
+        samples,
+        sampleRate,
+        third
+      )
+      *
+      0.055;
+
+  }
+
+
+  return support;
+
+}
+
+
+/* =========================================
+   FINALIZAR PERFIL GRAVE
+========================================= */
+
+function scoreBassProfile(
+  profile,
   samples,
   sampleRate
 ){
 
-  const bins =
-    analyzeBassSpectrum(
-      samples,
-      sampleRate
+  if(
+    !Array.isArray(profile)
+    ||
+    profile.length === 0
+  ){
+
+    return [];
+
+  }
+
+
+  const output =
+    profile.map(
+      item => ({
+        ...item
+      })
     );
 
 
-  const corrected =
-    applyHarmonicCorrection(
-      bins
+  /*
+    Primeiro calculamos suporte
+    harmônico bruto.
+  */
+
+  const harmonicRaw =
+    output.map(
+      item =>
+        calculateHarmonicSupport(
+          samples,
+          sampleRate,
+          item.frequency
+        )
     );
 
+
+  const harmonicNormalized =
+    normalizeVector(
+      harmonicRaw
+    );
+
+
+  for(
+    let i = 0;
+    i < output.length;
+    i++
+  ){
+
+    const current =
+      output[i];
+
+
+    const left =
+      i > 0
+      ?
+      output[i - 1]
+        .directNormalized
+      :
+      0;
+
+
+    const right =
+      i <
+      output.length - 1
+      ?
+      output[i + 1]
+        .directNormalized
+      :
+      0;
+
+
+    /*
+      Um pico real deve ser maior
+      que notas cromáticas vizinhas.
+    */
+
+    const neighborMax =
+      Math.max(
+        left,
+        right
+      );
+
+
+    const localDominance =
+      clamp(
+        current.directNormalized
+        -
+        neighborMax
+        +
+        0.5,
+        0,
+        1
+      );
+
+
+    /*
+      Suporte harmônico ajuda,
+      mas jamais domina o direto.
+    */
+
+    const harmonic =
+      harmonicNormalized
+      ?
+      harmonicNormalized[i]
+      :
+      0;
+
+
+    /*
+      Pequeno viés para frequências
+      mais graves.
+
+      Isso ajuda a encontrar o
+      baixo verdadeiro em um acorde.
+    */
+
+    const lowBias =
+      1
+      -
+      (
+        (
+          current.midi
+          -
+          BASS_MIN_MIDI
+        )
+        /
+        Math.max(
+          1,
+          BASS_MAX_MIDI
+          -
+          BASS_MIN_MIDI
+        )
+      );
+
+
+    current.harmonicSupport =
+      harmonic;
+
+
+    current.localDominance =
+      localDominance;
+
+
+    current.rootScore =
+      current.directNormalized
+      *
+      0.74
+      +
+      harmonic
+      *
+      0.11
+      +
+      localDominance
+      *
+      0.10
+      +
+      lowBias
+      *
+      0.05;
+
+  }
+
+
+  return output;
+
+}
+
+
+/* =========================================
+   ESCOLHER FUNDAMENTAL GRAVE
+
+   Estratégia principal:
+
+   entre os picos realmente fortes,
+   preferimos o MAIS GRAVE.
+
+   Isso é muito diferente de somar
+   todas as oitavas por pitch class.
+========================================= */
+
+function selectBassCandidate(
+  profile
+){
+
+  if(
+    !Array.isArray(profile)
+    ||
+    profile.length === 0
+  ){
+
+    return {
+
+      bassNote:null,
+
+      bassFullNote:null,
+
+      bassMidi:null,
+
+      bassConfidence:0
+
+    };
+
+  }
+
+
+  /*
+    Primeiro encontramos o máximo
+    de energia direta.
+  */
+
+  const maxDirect =
+    Math.max(
+      ...profile.map(
+        item =>
+          item.directNormalized
+      )
+    );
+
+
+  if(
+    maxDirect <= 0
+  ){
+
+    return {
+
+      bassNote:null,
+
+      bassFullNote:null,
+
+      bassMidi:null,
+
+      bassConfidence:0
+
+    };
+
+  }
+
+
+  /*
+    Picos locais fortes.
+
+    O threshold é relativo ao
+    próprio frame.
+  */
+
+  let strong =
+    profile.filter(
+      (item,index) => {
+
+        const left =
+          index > 0
+          ?
+          profile[index - 1]
+            .directNormalized
+          :
+          0;
+
+
+        const right =
+          index <
+          profile.length - 1
+          ?
+          profile[index + 1]
+            .directNormalized
+          :
+          0;
+
+
+        const isLocalPeak =
+          item.directNormalized >=
+          left
+          &&
+          item.directNormalized >=
+          right;
+
+
+        const strongEnough =
+          item.directNormalized >=
+          0.48;
+
+
+        return (
+          isLocalPeak
+          &&
+          strongEnough
+        );
+
+      }
+    );
+
+
+  /*
+    Se não achamos nenhum pico
+    acima de 0.48, relaxamos.
+  */
+
+  if(
+    strong.length === 0
+  ){
+
+    strong =
+      profile.filter(
+        (item,index) => {
+
+          const left =
+            index > 0
+            ?
+            profile[index - 1]
+              .directNormalized
+            :
+            0;
+
+
+          const right =
+            index <
+            profile.length - 1
+            ?
+            profile[index + 1]
+              .directNormalized
+            :
+            0;
+
+
+          return (
+            item.directNormalized >=
+            0.36
+            &&
+            item.directNormalized >=
+            left
+            &&
+            item.directNormalized >=
+            right
+          );
+
+        }
+      );
+
+  }
+
+
+  /*
+    Caso ainda não haja candidato,
+    usa maior rootScore.
+  */
+
+  let selected;
+
+
+  if(
+    strong.length > 0
+  ){
+
+    /*
+      Regra central:
+
+      o menor MIDI forte ganha.
+
+      Porém ignoramos um pico grave
+      se ele for extremamente mais
+      fraco que os demais.
+    */
+
+    const highestStrongDirect =
+      Math.max(
+        ...strong.map(
+          item =>
+            item.directNormalized
+        )
+      );
+
+
+    const trustworthy =
+      strong.filter(
+        item =>
+          item.directNormalized >=
+          highestStrongDirect
+          *
+          0.62
+      );
+
+
+    trustworthy.sort(
+      (a,b) =>
+        a.midi - b.midi
+    );
+
+
+    selected =
+      trustworthy[0];
+
+  }
+
+  else{
+
+    selected =
+      [...profile]
+        .sort(
+          (a,b) =>
+            b.rootScore
+            -
+            a.rootScore
+        )[0];
+
+  }
+
+
+  if(!selected){
+
+    return {
+
+      bassNote:null,
+
+      bassFullNote:null,
+
+      bassMidi:null,
+
+      bassConfidence:0
+
+    };
+
+  }
+
+
+  /*
+    Quanto de energia forte existe
+    ABAIXO da nota selecionada?
+
+    Se praticamente não existe,
+    temos boa evidência de que ela
+    é realmente a nota mais grave.
+  */
+
+  const lowerBins =
+    profile.filter(
+      item =>
+        item.midi <
+        selected.midi
+    );
+
+
+  const strongestBelow =
+    lowerBins.length
+    ?
+    Math.max(
+      ...lowerBins.map(
+        item =>
+          item.directNormalized
+      )
+    )
+    :
+    0;
+
+
+  const lowerSeparation =
+    clamp(
+      (
+        selected.directNormalized
+        -
+        strongestBelow
+      )
+      /
+      0.45,
+      0,
+      1
+    );
+
+
+  const directConfidence =
+    clamp(
+      (
+        selected.directNormalized
+        -
+        0.30
+      )
+      /
+      0.70,
+      0,
+      1
+    );
+
+
+  const localConfidence =
+    clamp(
+      selected.localDominance,
+      0,
+      1
+    );
+
+
+  let confidence =
+    directConfidence
+    *
+    0.48
+    +
+    lowerSeparation
+    *
+    0.36
+    +
+    localConfidence
+    *
+    0.16;
+
+
+  confidence =
+    clamp(
+      confidence,
+      0,
+      0.98
+    );
+
+
+  /*
+    Não retornamos null facilmente.
+
+    O Chord Engine já foi construído
+    para tratar baixo como evidência,
+    não verdade absoluta.
+  */
+
+  if(
+    selected.directNormalized <
+    0.30
+    ||
+    confidence <
+    0.25
+  ){
+
+    return {
+
+      bassNote:null,
+
+      bassFullNote:null,
+
+      bassMidi:null,
+
+      bassConfidence:
+        Number(
+          confidence.toFixed(3)
+        )
+
+    };
+
+  }
+
+
+  return {
+
+    bassNote:
+      NOTE_NAMES[
+        selected.pitchClass
+      ],
+
+    bassFullNote:
+      selected.fullNote,
+
+    bassMidi:
+      selected.midi,
+
+    bassConfidence:
+      Number(
+        confidence.toFixed(3)
+      ),
+
+    directEnergy:
+      Number(
+        selected
+          .directNormalized
+          .toFixed(3)
+      ),
+
+    rootScore:
+      Number(
+        selected
+          .rootScore
+          .toFixed(3)
+      )
+
+  };
+
+}
+
+
+/* =========================================
+   PERFIL -> BASS CHROMA
+
+   Agora só transformamos em pitch
+   class DEPOIS de analisar alturas.
+========================================= */
+
+function bassProfileToChroma(
+  profile
+){
 
   const chroma =
     new Array(12)
       .fill(0);
 
 
+  if(
+    !Array.isArray(profile)
+  ){
+
+    return chroma;
+
+  }
+
+
   for(
-    const bin
-    of corrected
+    const item
+    of profile
   ){
 
     /*
-      Quanto mais grave a oitava,
-      maior o peso como possível root.
+      Usamos rootScore.
+
+      Frequências mais altas não
+      recebem soma exagerada.
     */
-
-    const octave =
-      Math.floor(
-        bin.midi / 12
-      )
-      -
-      1;
-
 
     let octaveWeight = 1;
 
 
-    if(octave <= 1){
-
-      octaveWeight =
-        1.00;
-
-    }
-
-    else if(octave === 2){
+    if(
+      item.midi >= 48
+      &&
+      item.midi <= 59
+    ){
 
       octaveWeight =
         0.78;
 
     }
 
-    else{
+
+    if(
+      item.midi < 48
+    ){
 
       octaveWeight =
-        0.48;
+        1.00;
 
     }
 
 
     chroma[
-      bin.pitchClass
+      item.pitchClass
     ] +=
-      bin.correctedEnergy
+      item.rootScore
       *
       octaveWeight;
 
@@ -654,11 +1390,101 @@ export function extractBassChroma(
 
 
 /* =========================================
+   ANALISAR BAIXO COMPLETO
+========================================= */
+
+function analyzeBassFrame(
+  samples,
+  sampleRate
+){
+
+  const rawProfile =
+    extractBassProfile(
+      samples,
+      sampleRate
+    );
+
+
+  const scoredProfile =
+    scoreBassProfile(
+      rawProfile,
+      samples,
+      sampleRate
+    );
+
+
+  const selected =
+    selectBassCandidate(
+      scoredProfile
+    );
+
+
+  const bassChroma =
+    bassProfileToChroma(
+      scoredProfile
+    );
+
+
+  return {
+
+    bassChroma,
+
+    bassProfile:
+      scoredProfile.map(
+        item =>
+          item.rootScore
+      ),
+
+    bassNote:
+      selected.bassNote,
+
+    bassFullNote:
+      selected.bassFullNote,
+
+    bassMidi:
+      selected.bassMidi,
+
+    bassConfidence:
+      selected.bassConfidence,
+
+    bassDirectEnergy:
+      selected.directEnergy
+      ??
+      0,
+
+    bassRootScore:
+      selected.rootScore
+      ??
+      0
+
+  };
+
+}
+
+
+/* =========================================
+   COMPATIBILIDADE:
+   EXTRACT BASS CHROMA
+========================================= */
+
+export function extractBassChroma(
+  samples,
+  sampleRate
+){
+
+  return analyzeBassFrame(
+    samples,
+    sampleRate
+  ).bassChroma;
+
+}
+
+
+/* =========================================
    ANALISAR BASS CHROMA
 
-   retorna:
-   bassNote
-   bassConfidence
+   Fallback quando só temos
+   o vetor de pitch classes.
 ========================================= */
 
 export function analyzeBassChroma(
@@ -705,9 +1531,19 @@ export function analyzeBassChroma(
       );
 
 
-  if(
-    ranked.length < 2
-  ){
+  const first =
+    ranked[0];
+
+
+  const second =
+    ranked[1]
+    ||
+    {
+      energy:0
+    };
+
+
+  if(!first){
 
     return {
 
@@ -722,67 +1558,34 @@ export function analyzeBassChroma(
   }
 
 
-  const first =
-    ranked[0];
-
-
-  const second =
-    ranked[1];
-
-
   const margin =
     first.energy
     -
     second.energy;
 
 
-  /*
-    Confiança:
-    - força absoluta
-    - margem para segundo colocado
-  */
-
-  const absolute =
+  const confidence =
     clamp(
       (
-        first.energy
-        -
-        0.25
+        first.energy * 0.60
       )
-      /
-      0.75,
+      +
+      (
+        clamp(
+          margin / 0.25,
+          0,
+          1
+        )
+        *
+        0.40
+      ),
       0,
-      1
+      0.95
     );
 
-
-  const separation =
-    clamp(
-      margin
-      /
-      0.22,
-      0,
-      1
-    );
-
-
-  const confidence =
-    absolute * 0.55
-    +
-    separation * 0.45;
-
-
-  /*
-    Só expomos bassNote quando
-    há evidência razoável.
-  */
 
   if(
-    first.energy < 0.34
-    ||
-    margin < 0.035
-    ||
-    confidence < 0.34
+    first.energy < 0.30
   ){
 
     return {
@@ -791,14 +1594,12 @@ export function analyzeBassChroma(
 
       bassConfidence:
         Number(
-          confidence
-            .toFixed(3)
+          confidence.toFixed(3)
         ),
 
       bassMargin:
         Number(
-          margin
-            .toFixed(3)
+          margin.toFixed(3)
         )
 
     };
@@ -815,18 +1616,12 @@ export function analyzeBassChroma(
 
     bassConfidence:
       Number(
-        clamp(
-          confidence,
-          0,
-          0.97
-        )
-        .toFixed(3)
+        confidence.toFixed(3)
       ),
 
     bassMargin:
       Number(
-        margin
-          .toFixed(3)
+        margin.toFixed(3)
       )
 
   };
@@ -945,12 +1740,17 @@ export function chromaToNotes(
       );
 
 
+  if(
+    ranked.length === 0
+  ){
+
+    return [];
+
+  }
+
+
   const strongest =
-    ranked[0]
-    ?
-    ranked[0].energy
-    :
-    0;
+    ranked[0].energy;
 
 
   if(
@@ -1035,7 +1835,7 @@ export function chromaToNotes(
 
 
 /* =========================================
-   ANALISAR FRAME
+   ANALISAR FRAME DE ÁUDIO
 ========================================= */
 
 export function analyzeAudioFrame(
@@ -1046,6 +1846,8 @@ export function analyzeAudioFrame(
 
   if(
     !samples
+    ||
+    typeof samples.length !== "number"
     ||
     samples.length === 0
   ){
@@ -1062,8 +1864,32 @@ export function analyzeAudioFrame(
   }
 
 
+  const rate =
+    Number(
+      sampleRate
+    );
+
+
+  if(
+    !Number.isFinite(rate)
+    ||
+    rate <= 0
+  ){
+
+    return {
+
+      valid:false,
+
+      error:
+        "sampleRate inválido"
+
+    };
+
+  }
+
+
   Meyda.sampleRate =
-    sampleRate;
+    rate;
 
 
   Meyda.bufferSize =
@@ -1099,6 +1925,9 @@ export function analyzeAudioFrame(
       valid:false,
 
       error:
+        "Falha ao extrair features",
+
+      detail:
         error.message
 
     };
@@ -1130,16 +1959,10 @@ export function analyzeAudioFrame(
     );
 
 
-  const bassChroma =
-    extractBassChroma(
-      samples,
-      sampleRate
-    );
-
-
   const bass =
-    analyzeBassChroma(
-      bassChroma
+    analyzeBassFrame(
+      samples,
+      rate
     );
 
 
@@ -1149,16 +1972,29 @@ export function analyzeAudioFrame(
 
     chroma,
 
-    bassChroma,
+    bassChroma:
+      bass.bassChroma,
+
+    bassProfile:
+      bass.bassProfile,
 
     bassNote:
       bass.bassNote,
 
+    bassFullNote:
+      bass.bassFullNote,
+
+    bassMidi:
+      bass.bassMidi,
+
     bassConfidence:
       bass.bassConfidence,
 
-    bassMargin:
-      bass.bassMargin,
+    bassDirectEnergy:
+      bass.bassDirectEnergy,
+
+    bassRootScore:
+      bass.bassRootScore,
 
     rms:
       Number(
@@ -1181,10 +2017,10 @@ export function analyzeAudioFrame(
 
 
 /* =========================================
-   MEDIANA VETOR 12
+   MEDIANA DE VETORES
 ========================================= */
 
-function medianVector12(
+function medianVector(
   vectors
 ){
 
@@ -1201,10 +2037,13 @@ function medianVector12(
 
   const valid =
     vectors
-      .map(
-        normalize12
-      )
-      .filter(Boolean);
+      .filter(
+        vector =>
+          vector
+          &&
+          typeof vector.length ===
+          "number"
+      );
 
 
   if(
@@ -1216,31 +2055,69 @@ function medianVector12(
   }
 
 
+  const length =
+    valid[0].length;
+
+
   const result =
-    new Array(12)
+    new Array(length)
       .fill(0);
 
 
   for(
-    let pitch = 0;
-    pitch < 12;
-    pitch++
+    let index = 0;
+    index < length;
+    index++
   ){
 
-    result[pitch] =
+    result[index] =
       median(
         valid.map(
           vector =>
-            vector[pitch]
+            Number(
+              vector[index]
+              ||
+              0
+            )
         )
       );
 
   }
 
 
-  return normalize12(
+  return normalizeVector(
     result
   );
+
+}
+
+
+/* =========================================
+   MEDIANA 12
+========================================= */
+
+function medianVector12(
+  vectors
+){
+
+  const result =
+    medianVector(
+      vectors
+    );
+
+
+  if(
+    !result
+    ||
+    result.length !== 12
+  ){
+
+    return null;
+
+  }
+
+
+  return result;
 
 }
 
@@ -1401,7 +2278,7 @@ export async function decodeWavBuffer(
 
 
 /* =========================================
-   MONO
+   CONVERTER PARA MONO
 ========================================= */
 
 export function toMono(
@@ -1523,9 +2400,20 @@ function calculateRmsFloor(
     ];
 
 
+  if(
+    maxRms <= 0
+  ){
+
+    return 0.0005;
+
+  }
+
+
   const lowIndex =
     Math.floor(
-      values.length * 0.10
+      values.length
+      *
+      0.10
     );
 
 
@@ -1546,6 +2434,291 @@ function calculateRmsFloor(
       maxRms * 0.08
     )
   );
+
+}
+
+
+/* =========================================
+   ANALISAR PERFIL AGREGADO
+========================================= */
+
+function analyzeAggregatedBassProfile(
+  profile
+){
+
+  if(
+    !profile
+    ||
+    profile.length !==
+    (
+      BASS_MAX_MIDI
+      -
+      BASS_MIN_MIDI
+      +
+      1
+    )
+  ){
+
+    return {
+
+      bassNote:null,
+
+      bassFullNote:null,
+
+      bassMidi:null,
+
+      bassConfidence:0
+
+    };
+
+  }
+
+
+  const normalized =
+    normalizeVector(
+      profile
+    );
+
+
+  if(!normalized){
+
+    return {
+
+      bassNote:null,
+
+      bassFullNote:null,
+
+      bassMidi:null,
+
+      bassConfidence:0
+
+    };
+
+  }
+
+
+  const candidates =
+    normalized.map(
+      (score,index) => {
+
+        const midi =
+          BASS_MIN_MIDI
+          +
+          index;
+
+
+        const left =
+          index > 0
+          ?
+          normalized[
+            index - 1
+          ]
+          :
+          0;
+
+
+        const right =
+          index <
+          normalized.length - 1
+          ?
+          normalized[
+            index + 1
+          ]
+          :
+          0;
+
+
+        return {
+
+          midi,
+
+          pitchClass:
+            midiToPitchClass(
+              midi
+            ),
+
+          fullNote:
+            midiToFullNoteName(
+              midi
+            ),
+
+          score,
+
+          localPeak:
+            score >= left
+            &&
+            score >= right
+
+        };
+
+      }
+    );
+
+
+  let strong =
+    candidates.filter(
+      item =>
+        item.localPeak
+        &&
+        item.score >=
+        0.48
+    );
+
+
+  if(
+    strong.length === 0
+  ){
+
+    strong =
+      candidates.filter(
+        item =>
+          item.localPeak
+          &&
+          item.score >=
+          0.35
+      );
+
+  }
+
+
+  let selected;
+
+
+  if(
+    strong.length > 0
+  ){
+
+    const strongest =
+      Math.max(
+        ...strong.map(
+          item =>
+            item.score
+        )
+      );
+
+
+    const reliable =
+      strong.filter(
+        item =>
+          item.score >=
+          strongest
+          *
+          0.62
+      );
+
+
+    reliable.sort(
+      (a,b) =>
+        a.midi
+        -
+        b.midi
+    );
+
+
+    selected =
+      reliable[0];
+
+  }
+
+  else{
+
+    selected =
+      [...candidates]
+        .sort(
+          (a,b) =>
+            b.score
+            -
+            a.score
+        )[0];
+
+  }
+
+
+  if(!selected){
+
+    return {
+
+      bassNote:null,
+
+      bassFullNote:null,
+
+      bassMidi:null,
+
+      bassConfidence:0
+
+    };
+
+  }
+
+
+  const lower =
+    candidates.filter(
+      item =>
+        item.midi <
+        selected.midi
+    );
+
+
+  const lowerMax =
+    lower.length
+    ?
+    Math.max(
+      ...lower.map(
+        item =>
+          item.score
+      )
+    )
+    :
+    0;
+
+
+  const separation =
+    clamp(
+      (
+        selected.score
+        -
+        lowerMax
+      )
+      /
+      0.40,
+      0,
+      1
+    );
+
+
+  const confidence =
+    clamp(
+      selected.score
+      *
+      0.62
+      +
+      separation
+      *
+      0.38,
+      0,
+      0.98
+    );
+
+
+  return {
+
+    bassNote:
+      NOTE_NAMES[
+        selected.pitchClass
+      ],
+
+    bassFullNote:
+      selected.fullNote,
+
+    bassMidi:
+      selected.midi,
+
+    bassConfidence:
+      Number(
+        confidence.toFixed(3)
+      )
+
+  };
 
 }
 
@@ -1582,10 +2755,10 @@ function aggregateFrames(
         options.windowSeconds
       ),
       0.12,
-      1
+      1.0
     )
     :
-    0.28;
+    0.30;
 
 
   const hopSeconds =
@@ -1610,6 +2783,12 @@ function aggregateFrames(
     calculateRmsFloor(
       rawFrames
     );
+
+
+  console.log(
+    "[Audio Engine v5] RMS floor:",
+    rmsFloor
+  );
 
 
   const duration =
@@ -1658,13 +2837,17 @@ function aggregateFrames(
 
         bassNote:null,
 
+        bassFullNote:null,
+
         bassConfidence:0,
 
         notes:[],
 
         rms:0,
 
-        silence:true
+        silence:true,
+
+        sourceFrames:0
 
       });
 
@@ -1676,34 +2859,47 @@ function aggregateFrames(
 
     const chroma =
       medianVector12(
+
         members.map(
           frame =>
             frame.chroma
         )
+
       );
 
 
     const bassChroma =
       medianVector12(
+
         members.map(
           frame =>
             frame.bassChroma
         )
+
+      );
+
+
+    /*
+      Muito importante:
+
+      agregamos o perfil com OITAVA,
+      não apenas o bassChroma.
+    */
+
+    const bassProfile =
+      medianVector(
+
+        members.map(
+          frame =>
+            frame.bassProfile
+        )
+
       );
 
 
     const bass =
-      analyzeBassChroma(
-        bassChroma
-      );
-
-
-    const rms =
-      median(
-        members.map(
-          frame =>
-            frame.rms
-        )
+      analyzeAggregatedBassProfile(
+        bassProfile
       );
 
 
@@ -1730,6 +2926,15 @@ function aggregateFrames(
       [];
 
 
+    const rms =
+      median(
+        members.map(
+          frame =>
+            frame.rms
+        )
+      );
+
+
     output.push({
 
       time,
@@ -1738,14 +2943,19 @@ function aggregateFrames(
 
       bassChroma,
 
+      bassProfile,
+
       bassNote:
         bass.bassNote,
 
+      bassFullNote:
+        bass.bassFullNote,
+
+      bassMidi:
+        bass.bassMidi,
+
       bassConfidence:
         bass.bassConfidence,
-
-      bassMargin:
-        bass.bassMargin,
 
       notes,
 
@@ -1758,6 +2968,37 @@ function aggregateFrames(
 
     });
 
+
+    if(
+      output.length <= 20
+    ){
+
+      console.log(
+
+        "[Audio Engine v5]",
+
+        time.toFixed(2),
+
+        "| bass:",
+
+        bass.bassFullNote,
+
+        "| class:",
+
+        bass.bassNote,
+
+        "| confidence:",
+
+        bass.bassConfidence,
+
+        "| notes:",
+
+        notes.join(",")
+
+      );
+
+    }
+
   }
 
 
@@ -1767,11 +3008,12 @@ function aggregateFrames(
 
 
 /* =========================================
-   ESTABILIZAR BAIXO
+   ESTABILIZAÇÃO TEMPORAL DO BAIXO
 ========================================= */
 
 function stabilizeBass(
-  frames
+  frames,
+  radius = 1
 ){
 
   if(
@@ -1791,18 +3033,21 @@ function stabilizeBass(
       const start =
         Math.max(
           0,
-          index - 1
+          index - radius
         );
 
 
       const end =
         Math.min(
           frames.length - 1,
-          index + 1
+          index + radius
         );
 
 
-      const weighted = {};
+      const scores = {};
+
+
+      const info = {};
 
 
       for(
@@ -1818,7 +3063,7 @@ function stabilizeBass(
         if(
           !neighbor
           ||
-          !neighbor.bassNote
+          !neighbor.bassFullNote
         ){
 
           continue;
@@ -1826,7 +3071,7 @@ function stabilizeBass(
         }
 
 
-        const weight =
+        const confidence =
           Number(
             neighbor.bassConfidence
             ||
@@ -1834,25 +3079,31 @@ function stabilizeBass(
           );
 
 
-        weighted[
-          neighbor.bassNote
+        scores[
+          neighbor.bassFullNote
         ] =
           (
-            weighted[
-              neighbor.bassNote
+            scores[
+              neighbor.bassFullNote
             ]
             ||
             0
           )
           +
-          weight;
+          confidence;
+
+
+        info[
+          neighbor.bassFullNote
+        ] =
+          neighbor;
 
       }
 
 
       const ranking =
         Object.entries(
-          weighted
+          scores
         )
         .sort(
           (a,b) =>
@@ -1874,14 +3125,22 @@ function stabilizeBass(
 
 
       const [
-        note,
-        score
+        fullNote,
+        totalScore
       ] =
         ranking[0];
 
 
+      const source =
+        info[
+          fullNote
+        ];
+
+
       if(
-        score < 0.55
+        !source
+        ||
+        totalScore < 0.48
       ){
 
         return {
@@ -1896,16 +3155,30 @@ function stabilizeBass(
         ...frame,
 
         bassNote:
-          note,
+          source.bassNote,
+
+        bassFullNote:
+          source.bassFullNote,
+
+        bassMidi:
+          source.bassMidi,
 
         bassConfidence:
           clamp(
             Math.max(
-              frame.bassConfidence || 0,
-              score / 3
+              Number(
+                frame.bassConfidence
+                ||
+                0
+              ),
+              totalScore
+              /
+              (
+                end - start + 1
+              )
             ),
             0,
-            0.97
+            0.98
           )
 
       };
@@ -1953,10 +3226,14 @@ export async function analyzeWavBuffer(
 
 
   /*
-    Para detecção grave, 8192 dá
-    resolução melhor que 4096.
+    Mantemos compatibilidade com
+    o server atual.
 
-    Mantemos configurável.
+    Se server envia 4096,
+    usamos 4096.
+
+    Depois podemos testar 8192
+    separadamente.
   */
 
   const frameSize =
@@ -1972,7 +3249,7 @@ export async function analyzeWavBuffer(
       )
     )
     :
-    8192;
+    4096;
 
 
   const hopSize =
@@ -2037,14 +3314,20 @@ export async function analyzeWavBuffer(
       bassChroma:
         analysis.bassChroma,
 
+      bassProfile:
+        analysis.bassProfile,
+
       bassNote:
         analysis.bassNote,
 
+      bassFullNote:
+        analysis.bassFullNote,
+
+      bassMidi:
+        analysis.bassMidi,
+
       bassConfidence:
         analysis.bassConfidence,
-
-      bassMargin:
-        analysis.bassMargin,
 
       rms:
         analysis.rms,
@@ -2089,7 +3372,7 @@ export async function analyzeWavBuffer(
         windowSeconds:
           options.windowSeconds
           ??
-          0.32,
+          0.30,
 
         decisionHopSeconds:
           options.decisionHopSeconds
@@ -2102,7 +3385,8 @@ export async function analyzeWavBuffer(
 
   decisionFrames =
     stabilizeBass(
-      decisionFrames
+      decisionFrames,
+      1
     );
 
 
@@ -2221,7 +3505,7 @@ export function smoothChromaFrames(
 
 
 /* =========================================
-   TESTE
+   TESTE INTERNO DE CHROMA
 ========================================= */
 
 export function createChromaTest(
@@ -2247,11 +3531,15 @@ export function createChromaTest(
     of notes
   ){
 
+    const normalized =
+      String(note)
+        .trim()
+        .toUpperCase();
+
+
     const index =
       NOTE_NAMES.indexOf(
-        String(note)
-          .trim()
-          .toUpperCase()
+        normalized
       );
 
 
@@ -2275,8 +3563,13 @@ export function createChromaTest(
       chromaToNotes(
         chroma,
         {
-          threshold:0.5,
-          maxNotes:6
+
+          threshold:
+            0.5,
+
+          maxNotes:
+            6
+
         }
       )
 
