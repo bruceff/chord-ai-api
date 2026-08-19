@@ -995,6 +995,16 @@ export function toMono(
    CALCULAR NÍVEL DE RUÍDO / SILÊNCIO
 ========================================= */
 
+/* =========================================
+   CALCULAR LIMIAR DE SILÊNCIO — V2.1
+
+   Não assume que o trecho mais baixo
+   necessariamente é ruído.
+
+   Isso evita classificar uma música
+   contínua inteira como silêncio.
+========================================= */
+
 function calculateRmsFloor(
   frames
 ){
@@ -1005,9 +1015,103 @@ function calculateRmsFloor(
     frames.length === 0
   ){
 
-    return 0.002;
+    return 0.0005;
 
   }
+
+
+  const values =
+    frames
+      .map(
+        frame =>
+          Number(
+            frame.rms || 0
+          )
+      )
+      .filter(
+        value =>
+          Number.isFinite(value)
+          &&
+          value >= 0
+      )
+      .sort(
+        (a,b) =>
+          a - b
+      );
+
+
+  if(
+    values.length === 0
+  ){
+
+    return 0.0005;
+
+  }
+
+
+  const maxRms =
+    values[
+      values.length - 1
+    ];
+
+
+  if(
+    maxRms <= 0
+  ){
+
+    return 0.0005;
+
+  }
+
+
+  const percentileIndex =
+    Math.floor(
+      values.length * 0.10
+    );
+
+
+  const lowLevel =
+    values[
+      Math.min(
+        percentileIndex,
+        values.length - 1
+      )
+    ];
+
+
+  /*
+    Limite principal:
+
+    nunca exigimos mais de 8%
+    do pico da música.
+  */
+
+  const relativeFloor =
+    maxRms * 0.08;
+
+
+  /*
+    Se houver silêncio real,
+    lowLevel será muito pequeno.
+
+    Se NÃO houver silêncio,
+    impedimos que lowLevel
+    aumente demais o threshold.
+  */
+
+  const adaptiveFloor =
+    Math.min(
+      lowLevel * 1.35,
+      relativeFloor
+    );
+
+
+  return Math.max(
+    0.0003,
+    adaptiveFloor
+  );
+
+}
 
 
   const values =
@@ -1107,7 +1211,10 @@ function aggregateFrames(
     )
     :
     0.25;
-
+console.log(
+  "[Audio Engine] RMS floor:",
+  rmsFloor
+);
 
   const hopSeconds =
     Number.isFinite(
@@ -1233,22 +1340,38 @@ function aggregateFrames(
 
     output.push({
 
-      time:
-        startTime,
+  time:
+    startTime,
 
-      chroma,
+  chroma,
 
-      notes,
+  notes,
 
-      rms,
+  rms,
 
-      silence:
-        false,
+  silence:
+    false,
 
-      sourceFrames:
-        members.length
+  sourceFrames:
+    members.length
 
-    });
+});
+
+
+if(
+  output.length <= 10
+){
+
+  console.log(
+    "[Audio Engine]",
+    startTime.toFixed(2),
+    "s | RMS:",
+    rms.toFixed(4),
+    "| notas:",
+    notes.join(",")
+  );
+
+}
 
   }
 
