@@ -26,12 +26,17 @@ jobs:
       - name: Configurar Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: "20"
+          package-manager-cache: false
 
 
-      - name: Mostrar versão do Node e npm
+      - name: Mostrar versões
         run: |
+          echo "=== NODE ==="
           node --version
+
+          echo ""
+          echo "=== NPM ==="
           npm --version
 
 
@@ -39,37 +44,195 @@ jobs:
         run: npm install
 
 
-      - name: Conferir arquivos de benchmark
+      - name: Conferir estrutura do projeto
         run: |
-          echo "Raiz do projeto:"
+          echo "=============================="
+          echo "RAIZ DO PROJETO"
+          echo "=============================="
+
           ls -lah
 
           echo ""
-          echo "Pasta benchmarks:"
+          echo "=============================="
+          echo "PASTA BENCHMARKS"
+          echo "=============================="
+
+          if [ ! -d benchmarks ]; then
+            echo "ERRO: pasta benchmarks não existe."
+            exit 1
+          fi
+
           ls -lah benchmarks
 
+
+      - name: Conferir arquivos WAV
+        run: |
+          echo "=============================="
+          echo "TIPO DOS WAVS"
+          echo "=============================="
+
+          file benchmarks/benchmark-a.wav
+          file benchmarks/benchmark-b.wav
+
           echo ""
-          echo "Arquivo cases.json:"
+          echo "=============================="
+          echo "TAMANHOS"
+          echo "=============================="
+
+          wc -c benchmarks/benchmark-a.wav
+          wc -c benchmarks/benchmark-b.wav
+
+          echo ""
+          echo "=============================="
+          echo "PRIMEIROS 16 BYTES"
+          echo "=============================="
+
+          echo "Benchmark A:"
+          od -An -tx1 -N16 benchmarks/benchmark-a.wav
+
+          echo ""
+          echo "Benchmark B:"
+          od -An -tx1 -N16 benchmarks/benchmark-b.wav
+
+
+      - name: Validar cabeçalho WAV
+        run: |
+          node <<'NODE'
+
+          const fs = require("fs");
+
+          const files = [
+            "benchmarks/benchmark-a.wav",
+            "benchmarks/benchmark-b.wav"
+          ];
+
+          let failed = false;
+
+          for (const file of files) {
+
+            console.log("");
+            console.log("Validando:", file);
+
+            if (!fs.existsSync(file)) {
+              console.error("ERRO: arquivo não existe.");
+              failed = true;
+              continue;
+            }
+
+            const buffer =
+              fs.readFileSync(file);
+
+            console.log(
+              "Tamanho:",
+              buffer.length,
+              "bytes"
+            );
+
+            if (buffer.length < 44) {
+              console.error(
+                "ERRO: WAV possui menos de 44 bytes."
+              );
+
+              failed = true;
+              continue;
+            }
+
+            const riff =
+              buffer
+                .subarray(0,4)
+                .toString("ascii");
+
+            const wave =
+              buffer
+                .subarray(8,12)
+                .toString("ascii");
+
+            console.log(
+              "RIFF:",
+              JSON.stringify(riff)
+            );
+
+            console.log(
+              "WAVE:",
+              JSON.stringify(wave)
+            );
+
+            if (
+              riff !== "RIFF"
+              ||
+              wave !== "WAVE"
+            ) {
+
+              console.error(
+                "ERRO: arquivo não possui cabeçalho WAV RIFF válido."
+              );
+
+              failed = true;
+
+              continue;
+            }
+
+            console.log(
+              "Cabeçalho WAV válido."
+            );
+          }
+
+          if (failed) {
+            process.exit(1);
+          }
+
+          console.log("");
+          console.log(
+            "Todos os WAVs passaram na validação."
+          );
+
+          NODE
+
+
+      - name: Conferir cases.json
+        run: |
+          echo "=============================="
+          echo "CASES.JSON"
+          echo "=============================="
+
+          if [ ! -f benchmarks/cases.json ]; then
+            echo "ERRO: benchmarks/cases.json não existe."
+            exit 1
+          fi
+
           cat benchmarks/cases.json
 
 
       - name: Aguardar API do Render
         run: |
-          echo "Verificando Chord AI no Render..."
+          echo "=============================="
+          echo "VERIFICANDO CHORD AI"
+          echo "=============================="
 
           for i in {1..30}; do
 
             if curl -fsS https://chord-ai-api.onrender.com/health > /dev/null; then
+
+              echo ""
               echo "API online."
+
+              curl -fsS https://chord-ai-api.onrender.com/health
+
+              echo ""
+
               exit 0
+
             fi
 
             echo "Tentativa $i/30..."
+
             sleep 5
 
           done
 
-          echo "A API não respondeu dentro do tempo limite."
+          echo ""
+          echo "ERRO: API não respondeu dentro do tempo limite."
+
           exit 1
 
 
@@ -97,28 +260,36 @@ jobs:
       - name: Mostrar último resultado
         if: always()
         run: |
-          echo "================================="
-          echo "Último resultado do benchmark"
-          echo "================================="
+          echo "=============================="
+          echo "ÚLTIMO RESULTADO"
+          echo "=============================="
 
           if [ -f benchmarks/last-result.json ]; then
+
             cat benchmarks/last-result.json
+
           else
+
             echo "last-result.json não foi criado."
+
           fi
 
 
       - name: Mostrar baseline
         if: always()
         run: |
-          echo "================================="
-          echo "Baseline"
-          echo "================================="
+          echo "=============================="
+          echo "BASELINE"
+          echo "=============================="
 
           if [ -f benchmarks/baseline.json ]; then
+
             cat benchmarks/baseline.json
+
           else
+
             echo "baseline.json ainda não existe."
+
           fi
 
 
