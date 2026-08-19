@@ -1,4 +1,6 @@
 import http from "http";
+import { spawn } from "child_process";
+import ffmpegPath from "ffmpeg-static";
 
 import {
   analyzeChord,
@@ -307,6 +309,581 @@ function readBinaryBody(req){
 
 
 /* =========================================
+   PCM 16-BIT ESTÉREO -> WAV
+
+   O FFmpeg produzirá PCM cru.
+
+   Esta função adiciona somente o cabeçalho
+   WAV necessário para que o Audio Engine
+   existente continue trabalhando exatamente
+   como antes.
+
+   Nenhuma análise musical acontece aqui.
+========================================= */
+
+function pcm16StereoToWav(
+  pcmBuffer
+){
+
+  const channels =
+    2;
+
+
+  const sampleRate =
+    44100;
+
+
+  const bitsPerSample =
+    16;
+
+
+  const bytesPerSample =
+    bitsPerSample / 8;
+
+
+  const blockAlign =
+    channels *
+    bytesPerSample;
+
+
+  const byteRate =
+    sampleRate *
+    blockAlign;
+
+
+  const header =
+    Buffer.alloc(
+      44
+    );
+
+
+  /* RIFF */
+
+  header.write(
+    "RIFF",
+    0,
+    "ascii"
+  );
+
+
+  header.writeUInt32LE(
+    36 +
+    pcmBuffer.length,
+    4
+  );
+
+
+  /* WAVE */
+
+  header.write(
+    "WAVE",
+    8,
+    "ascii"
+  );
+
+
+  /* fmt */
+
+  header.write(
+    "fmt ",
+    12,
+    "ascii"
+  );
+
+
+  /*
+    Tamanho do bloco fmt para PCM.
+  */
+
+  header.writeUInt32LE(
+    16,
+    16
+  );
+
+
+  /*
+    AudioFormat = 1
+    significa PCM linear.
+  */
+
+  header.writeUInt16LE(
+    1,
+    20
+  );
+
+
+  header.writeUInt16LE(
+    channels,
+    22
+  );
+
+
+  header.writeUInt32LE(
+    sampleRate,
+    24
+  );
+
+
+  header.writeUInt32LE(
+    byteRate,
+    28
+  );
+
+
+  header.writeUInt16LE(
+    blockAlign,
+    32
+  );
+
+
+  header.writeUInt16LE(
+    bitsPerSample,
+    34
+  );
+
+
+  /* data */
+
+  header.write(
+    "data",
+    36,
+    "ascii"
+  );
+
+
+  header.writeUInt32LE(
+    pcmBuffer.length,
+    40
+  );
+
+
+  return Buffer.concat(
+    [
+      header,
+      pcmBuffer
+    ]
+  );
+
+}
+
+
+/* =========================================
+   DECODIFICAR MP3 -> WAV
+
+   IMPORTANTE:
+
+   Esta função é somente um adaptador
+   de formato.
+
+   MP3
+      ↓
+   FFmpeg
+      ↓
+   PCM 16-bit
+   44.1 kHz
+   estéreo
+      ↓
+   cabeçalho WAV
+      ↓
+   analyzeWavBuffer()
+
+   Portanto o Audio Engine, Chord Engine
+   e Reconstruction Validator continuam
+   recebendo o mesmo tipo de entrada que
+   recebiam anteriormente.
+========================================= */
+
+function decodeMp3ToWav(
+  mp3Buffer
+){
+
+  return new Promise(
+    (
+      resolve,
+      reject
+    ) => {
+
+      if(
+        !Buffer.isBuffer(
+          mp3Buffer
+        )
+        ||
+        mp3Buffer.length === 0
+      ){
+
+        reject(
+          new Error(
+            "Arquivo MP3 vazio"
+          )
+        );
+
+
+        return;
+
+      }
+
+
+      if(
+        !ffmpegPath
+      ){
+
+        reject(
+          new Error(
+            "FFmpeg não está disponível no servidor"
+          )
+        );
+
+
+        return;
+
+      }
+
+
+      const ffmpeg =
+        spawn(
+          ffmpegPath,
+          [
+
+            "-hide_banner",
+
+            "-loglevel",
+            "error",
+
+            /*
+              Entrada pelo stdin.
+            */
+
+            "-i",
+            "pipe:0",
+
+            /*
+              Ignora vídeo, imagem de capa
+              e outros streams que possam
+              existir dentro do arquivo.
+            */
+
+            "-vn",
+
+            /*
+              Saída PCM linear de 16 bits.
+            */
+
+            "-acodec",
+            "pcm_s16le",
+
+            /*
+              Padronizamos a entrada do
+              Audio Engine em 44.1 kHz.
+            */
+
+            "-ar",
+            "44100",
+
+            /*
+              Mantemos dois canais.
+
+              O Audio Engine continua sendo
+              responsável pela maneira como
+              os canais são utilizados na
+              análise.
+            */
+
+            "-ac",
+            "2",
+
+            /*
+              PCM cru.
+
+              O cabeçalho WAV será criado
+              depois que soubermos o tamanho
+              final do buffer.
+            */
+
+            "-f",
+            "s16le",
+
+            "pipe:1"
+
+          ],
+          {
+
+            stdio:[
+              "pipe",
+              "pipe",
+              "pipe"
+            ]
+
+          }
+        );
+
+
+      const outputChunks =
+        [];
+
+
+      const errorChunks =
+        [];
+
+
+      let outputSize =
+        0;
+
+
+      let finished =
+        false;
+
+
+      /*
+        Proteção temporária de memória.
+
+        MP3 é comprimido, enquanto PCM não é.
+
+        Portanto um arquivo relativamente
+        pequeno pode produzir um buffer
+        decodificado muito maior.
+
+        Nesta primeira implementação ainda
+        processamos o áudio em memória para
+        preservar o pipeline existente.
+      */
+
+      const MAX_DECODED_SIZE =
+        200 *
+        1024 *
+        1024;
+
+
+      ffmpeg.stdout.on(
+        "data",
+        chunk => {
+
+          if(finished)
+            return;
+
+
+          outputSize +=
+            chunk.length;
+
+
+          if(
+            outputSize >
+            MAX_DECODED_SIZE
+          ){
+
+            finished =
+              true;
+
+
+            ffmpeg.kill(
+              "SIGKILL"
+            );
+
+
+            reject(
+              new Error(
+                "Áudio decodificado excede o limite permitido"
+              )
+            );
+
+
+            return;
+
+          }
+
+
+          outputChunks.push(
+            chunk
+          );
+
+        }
+      );
+
+
+      ffmpeg.stderr.on(
+        "data",
+        chunk => {
+
+          /*
+            Não permitimos que stderr cresça
+            indefinidamente na memória.
+
+            Ele é usado somente para fornecer
+            uma mensagem útil caso a
+            decodificação falhe.
+          */
+
+          if(
+            errorChunks.length <
+            20
+          ){
+
+            errorChunks.push(
+              chunk
+            );
+
+          }
+
+        }
+      );
+
+
+      ffmpeg.on(
+        "error",
+        error => {
+
+          if(finished)
+            return;
+
+
+          finished =
+            true;
+
+
+          reject(
+            new Error(
+              "Falha ao iniciar o decoder MP3: "
+              +
+              error.message
+            )
+          );
+
+        }
+      );
+
+
+      ffmpeg.on(
+        "close",
+        code => {
+
+          if(finished)
+            return;
+
+
+          finished =
+            true;
+
+
+          if(
+            code !== 0
+          ){
+
+            const detail =
+              Buffer.concat(
+                errorChunks
+              )
+              .toString(
+                "utf8"
+              )
+              .trim();
+
+
+            reject(
+              new Error(
+                detail
+                ||
+                "MP3 inválido ou não suportado"
+              )
+            );
+
+
+            return;
+
+          }
+
+
+          const pcmBuffer =
+            Buffer.concat(
+              outputChunks
+            );
+
+
+          if(
+            pcmBuffer.length === 0
+          ){
+
+            reject(
+              new Error(
+                "Não foi possível extrair áudio do MP3"
+              )
+            );
+
+
+            return;
+
+          }
+
+
+          /*
+            Finalmente encapsulamos o PCM
+            em WAV.
+
+            Daqui para frente o pipeline
+            existente não precisa saber
+            que a entrada original era MP3.
+          */
+
+          resolve(
+            pcm16StereoToWav(
+              pcmBuffer
+            )
+          );
+
+        }
+      );
+
+
+      ffmpeg.stdin.on(
+        "error",
+        error => {
+
+          /*
+            Se o FFmpeg identificar um arquivo
+            inválido e encerrar antes de consumir
+            todo o stdin, Node pode emitir EPIPE.
+
+            Nesse caso o evento "close" acima
+            fornecerá o erro real do FFmpeg.
+          */
+
+          if(
+            error.code ===
+            "EPIPE"
+          ){
+
+            return;
+
+          }
+
+
+          if(finished)
+            return;
+
+
+          finished =
+            true;
+
+
+          reject(error);
+
+        }
+      );
+
+
+      /*
+        Envia o MP3 para o processo FFmpeg.
+      */
+
+      ffmpeg.stdin.end(
+        mp3Buffer
+      );
+
+    }
+  );
+
+}
+
+
+/* =========================================
    METADADOS DO YOUTUBE
 ========================================= */
 
@@ -422,7 +999,8 @@ function createBassTimeline(
   }
 
 
-  const timeline = [];
+  const timeline =
+    [];
 
 
   for(
@@ -448,7 +1026,9 @@ function createBassTimeline(
 
 
     if(
-      !Number.isFinite(start)
+      !Number.isFinite(
+        start
+      )
     ){
 
       continue;
@@ -460,15 +1040,16 @@ function createBassTimeline(
       next
       &&
       Number.isFinite(
-        Number(next.time)
+        Number(
+          next.time
+        )
       )
       ?
       Number(
         next.time
       )
       :
-      start
-      +
+      start +
       step;
 
 
@@ -494,25 +1075,29 @@ function createBassTimeline(
       previous.end =
         end;
 
+
       previous.frameCount++;
+
 
       continue;
 
     }
 
 
-    timeline.push({
+    timeline.push(
+      {
 
-      start,
+        start,
 
-      end,
+        end,
 
-      bassNote,
+        bassNote,
 
-      frameCount:
-        1
+        frameCount:
+          1
 
-    });
+      }
+    );
 
   }
 
@@ -532,9 +1117,13 @@ function createBassByChordRegion(
 ){
 
   if(
-    !Array.isArray(chordTimeline)
+    !Array.isArray(
+      chordTimeline
+    )
     ||
-    !Array.isArray(frames)
+    !Array.isArray(
+      frames
+    )
   ){
 
     return [];
@@ -556,7 +1145,8 @@ function createBassByChordRegion(
         );
 
 
-      const counts = {};
+      const counts =
+        {};
 
 
       for(
@@ -590,7 +1180,8 @@ function createBassByChordRegion(
         )
         .sort(
           (a,b) =>
-            b[1] - a[1]
+            b[1] -
+            a[1]
         );
 
 
@@ -641,9 +1232,17 @@ function createBassByChordRegion(
 
         bassRanking:
           ranking
-            .slice(0,4)
+            .slice(
+              0,
+              4
+            )
             .map(
-              ([note,count]) => ({
+              (
+                [
+                  note,
+                  count
+                ]
+              ) => ({
 
                 note,
 
@@ -658,8 +1257,6 @@ function createBassByChordRegion(
   );
 
 }
-
-
 /* =========================================
    SERVIDOR
 ========================================= */
@@ -1560,27 +2157,65 @@ const server =
 
 
       /* =====================================
-         ANALISAR WAV
+         ANALISAR ÁUDIO
+
+         WAV continua funcionando como antes.
+
+         MP3 é convertido para WAV antes de
+         entrar no pipeline.
+
+         Portanto existe somente UM pipeline
+         de reconhecimento:
+
+         WAV ──────────────┐
+                           ↓
+         MP3 → FFmpeg → WAV
+                           ↓
+                    Audio Engine
+                           ↓
+                    Chord Engine
+                           ↓
+               Reconstruction Validator
       ===================================== */
 
       if(
         req.method === "POST"
         &&
-        req.url === "/analyze-wav"
+        (
+          req.url === "/analyze-wav"
+          ||
+          req.url === "/analyze-mp3"
+        )
       ){
+                try{
 
-        try{
+          /*
+            Primeiro recebemos o arquivo original.
 
-          const buffer =
+            Para WAV:
+              inputBuffer já será usado diretamente.
+
+            Para MP3:
+              inputBuffer será enviado ao FFmpeg e
+              convertido para WAV antes de chegar
+              ao Audio Engine.
+          */
+
+          const inputBuffer =
             await readBinaryBody(
               req
             );
 
 
+          const isMp3 =
+            req.url ===
+            "/analyze-mp3";
+
+
           if(
-            !buffer
+            !inputBuffer
             ||
-            buffer.length === 0
+            inputBuffer.length === 0
           ){
 
             sendJson(
@@ -1588,6 +2223,10 @@ const server =
               400,
               {
                 error:
+                  isMp3
+                  ?
+                  "Arquivo MP3 vazio"
+                  :
                   "Arquivo WAV vazio"
               }
             );
@@ -1596,6 +2235,30 @@ const server =
             return;
 
           }
+
+
+          /* =================================
+             ADAPTADOR DE ENTRADA
+
+             WAV:
+             entra diretamente.
+
+             MP3:
+             FFmpeg -> PCM -> WAV.
+
+             Depois deste ponto não existe
+             diferença entre WAV e MP3 para
+             nenhuma das nossas engines.
+          ================================= */
+
+          const buffer =
+            isMp3
+            ?
+            await decodeMp3ToWav(
+              inputBuffer
+            )
+            :
+            inputBuffer;
 
 
           /* =================================
@@ -1707,6 +2370,14 @@ const server =
 
           /* =================================
              2. RECONSTRUCTION VALIDATOR v2
+
+             IMPORTANTE:
+
+             Os parâmetros abaixo são exatamente
+             os que estavam no server.js enviado.
+
+             Não estamos recalibrando a engine
+             durante a implementação de MP3.
           ================================= */
 
           const validatedTimeline =
@@ -1932,6 +2603,20 @@ const server =
               engine:
                 "Chord AI",
 
+              /*
+                Campo novo apenas para sabermos
+                qual formato chegou à API.
+
+                Isso não interfere na análise.
+              */
+
+              inputFormat:
+                isMp3
+                ?
+                "mp3"
+                :
+                "wav",
+
               audioEngine:
                 "v3-bass",
 
@@ -1994,9 +2679,14 @@ const server =
         catch(error){
 
           console.error(
-            "ERRO /analyze-wav:",
+            `ERRO ${req.url}:`,
             error
           );
+
+
+          const isMp3 =
+            req.url ===
+            "/analyze-mp3";
 
 
           sendJson(
@@ -2005,6 +2695,10 @@ const server =
             {
 
               error:
+                isMp3
+                ?
+                "Falha ao analisar MP3"
+                :
                 "Falha ao analisar WAV",
 
               message:
@@ -2083,6 +2777,10 @@ server.listen(
 
     console.log(
       "Bass diagnostics: ON"
+    );
+
+    console.log(
+      "MP3 input: ON"
     );
 
     console.log(
