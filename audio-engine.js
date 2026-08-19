@@ -3,7 +3,7 @@ import WavDecoder from "wav-decoder";
 
 
 /* =========================================
-   CHORD AI — AUDIO ENGINE v2
+   CHORD AI — AUDIO ENGINE v2.1
 
    WAV
     ↓
@@ -13,7 +13,7 @@ import WavDecoder from "wav-decoder";
     ↓
    chroma
     ↓
-   filtro de silêncio
+   filtro de silêncio corrigido
     ↓
    agregação temporal
     ↓
@@ -177,41 +177,7 @@ function normalizeChroma(
 
 
 /* =========================================
-   ENERGIA TOTAL DO CHROMA
-========================================= */
-
-function chromaEnergy(
-  chroma
-){
-
-  if(
-    !Array.isArray(chroma)
-  ){
-
-    return 0;
-
-  }
-
-
-  return chroma.reduce(
-    (sum,value) =>
-      sum + value,
-    0
-  );
-
-}
-
-
-/* =========================================
    CHROMA -> NOTAS
-
-   Agora não usamos apenas threshold fixo.
-
-   Levamos em conta:
-   - energia relativa
-   - distância da nota mais forte
-   - limite máximo
-   - quantidade de notas realmente fortes
 ========================================= */
 
 export function chromaToNotes(
@@ -347,12 +313,9 @@ export function chromaToNotes(
 
 
   /*
-    Para um acorde simples,
-    normalmente queremos 3 notas.
-
-    Se existem três notas claramente
-    fortes e o quarto candidato é muito
-    mais fraco, paramos em três.
+    Se as três primeiras notas
+    forem fortes e a quarta muito
+    mais fraca, mantemos só três.
   */
 
   if(
@@ -390,13 +353,8 @@ export function chromaToNotes(
 
 
   /*
-    Muito importante:
-
-    NÃO retornamos a nota mais forte
-    sozinha para análise de acordes.
-
-    Uma única nota não é informação
-    harmônica suficiente.
+    Uma única nota não é
+    suficiente para um acorde.
   */
 
   if(
@@ -590,9 +548,6 @@ export function analyzeAudioFrame(
 
 /* =========================================
    MEDIANA DE CHROMAS
-
-   Muito mais resistente a ruído
-   que média simples.
 ========================================= */
 
 export function medianChroma(
@@ -662,10 +617,7 @@ export function medianChroma(
 
 
 /* =========================================
-   MÉDIA DE CHROMA
-
-   Mantida porque outras rotas
-   do projeto já podem usar.
+   MÉDIA DE CHROMAS
 ========================================= */
 
 export function averageChroma(
@@ -747,9 +699,7 @@ export function averageChroma(
 
 
 /* =========================================
-   SUAVIZAÇÃO SIMPLES
-
-   Mantida por compatibilidade.
+   SUAVIZAÇÃO
 ========================================= */
 
 export function smoothChromaFrames(
@@ -992,17 +942,7 @@ export function toMono(
 
 
 /* =========================================
-   CALCULAR NÍVEL DE RUÍDO / SILÊNCIO
-========================================= */
-
-/* =========================================
-   CALCULAR LIMIAR DE SILÊNCIO — V2.1
-
-   Não assume que o trecho mais baixo
-   necessariamente é ruído.
-
-   Isso evita classificar uma música
-   contínua inteira como silêncio.
+   LIMIAR DE SILÊNCIO — CORRIGIDO
 ========================================= */
 
 function calculateRmsFloor(
@@ -1080,10 +1020,8 @@ function calculateRmsFloor(
 
 
   /*
-    Limite principal:
-
-    nunca exigimos mais de 8%
-    do pico da música.
+    Nunca exigimos mais
+    de 8% do pico da música.
   */
 
   const relativeFloor =
@@ -1092,11 +1030,11 @@ function calculateRmsFloor(
 
   /*
     Se houver silêncio real,
-    lowLevel será muito pequeno.
+    lowLevel tende a ser baixo.
 
-    Se NÃO houver silêncio,
-    impedimos que lowLevel
-    aumente demais o threshold.
+    Se a música for contínua,
+    impedimos o threshold de
+    subir demais.
   */
 
   const adaptiveFloor =
@@ -1114,69 +1052,8 @@ function calculateRmsFloor(
 }
 
 
-  const values =
-    frames
-      .map(
-        frame =>
-          Number(
-            frame.rms || 0
-          )
-      )
-      .filter(
-        value =>
-          Number.isFinite(value)
-      )
-      .sort(
-        (a,b) =>
-          a - b
-      );
-
-
-  if(
-    values.length === 0
-  ){
-
-    return 0.002;
-
-  }
-
-
-  /*
-    Percentil baixo:
-    aproxima o piso de ruído.
-  */
-
-  const index =
-    Math.floor(
-      values.length * 0.15
-    );
-
-
-  const noise =
-    values[
-      Math.min(
-        index,
-        values.length - 1
-      )
-    ];
-
-
-  return Math.max(
-    0.0015,
-    noise * 2.2
-  );
-
-}
-
-
 /* =========================================
    AGRUPAR FRAMES EM JANELAS MUSICAIS
-
-   Em vez de decidir um acorde a cada
-   ~46 ms, agrupamos vários frames.
-
-   Default:
-   cerca de 250 ms por decisão.
 ========================================= */
 
 function aggregateFrames(
@@ -1210,11 +1087,8 @@ function aggregateFrames(
       1.0
     )
     :
-    0.25;
-console.log(
-  "[Audio Engine] RMS floor:",
-  rmsFloor
-);
+    0.28;
+
 
   const hopSeconds =
     Number.isFinite(
@@ -1240,10 +1114,20 @@ console.log(
     );
 
 
-  const duration =
+  console.log(
+    "[Audio Engine] RMS floor:",
+    rmsFloor
+  );
+
+
+  const lastFrame =
     rawFrames[
       rawFrames.length - 1
-    ].time;
+    ];
+
+
+  const duration =
+    lastFrame.time;
 
 
   const output = [];
@@ -1291,7 +1175,10 @@ console.log(
           0,
 
         silence:
-          true
+          true,
+
+        sourceFrames:
+          0
 
       });
 
@@ -1327,10 +1214,30 @@ console.log(
         {
 
           threshold:
-            options.threshold,
+            Number.isFinite(
+              Number(
+                options.threshold
+              )
+            )
+            ?
+            Number(
+              options.threshold
+            )
+            :
+            0.62,
 
           maxNotes:
-            options.maxNotes
+            Number.isFinite(
+              Number(
+                options.maxNotes
+              )
+            )
+            ?
+            Number(
+              options.maxNotes
+            )
+            :
+            5
 
         }
       )
@@ -1340,38 +1247,43 @@ console.log(
 
     output.push({
 
-  time:
-    startTime,
+      time:
+        startTime,
 
-  chroma,
+      chroma,
 
-  notes,
+      notes,
 
-  rms,
+      rms,
 
-  silence:
-    false,
+      silence:
+        false,
 
-  sourceFrames:
-    members.length
+      sourceFrames:
+        members.length
 
-});
+    });
 
 
-if(
-  output.length <= 10
-){
+    /*
+      Diagnóstico dos primeiros
+      frames musicais.
+    */
 
-  console.log(
-    "[Audio Engine]",
-    startTime.toFixed(2),
-    "s | RMS:",
-    rms.toFixed(4),
-    "| notas:",
-    notes.join(",")
-  );
+    if(
+      output.length <= 10
+    ){
 
-}
+      console.log(
+        "[Audio Engine]",
+        startTime.toFixed(2),
+        "s | RMS:",
+        rms.toFixed(4),
+        "| notas:",
+        notes.join(",")
+      );
+
+    }
 
   }
 
@@ -1382,13 +1294,7 @@ if(
 
 
 /* =========================================
-   NOTAS PERSISTENTES
-
-   Uma nota precisa aparecer em frames
-   vizinhos para ganhar confiança.
-
-   Isso elimina muitos harmônicos
-   instantâneos.
+   PERSISTÊNCIA DAS NOTAS
 ========================================= */
 
 function enforceNotePersistence(
@@ -1486,9 +1392,8 @@ function enforceNotePersistence(
 
 
       /*
-        Não deixamos um acorde desaparecer
-        completamente só por uma pequena
-        diferença de vizinhança.
+        Não deixa um acorde sumir
+        por diferença pequena.
       */
 
       if(
@@ -1522,7 +1427,7 @@ function enforceNotePersistence(
 
 
 /* =========================================
-   ANALISAR WAV COMPLETO — V2
+   ANALISAR WAV COMPLETO
 ========================================= */
 
 export async function analyzeWavBuffer(
@@ -1629,9 +1534,7 @@ export async function analyzeWavBuffer(
     rawFrames.push({
 
       time:
-        start
-        /
-        sampleRate,
+        start / sampleRate,
 
       chroma:
         analysis.chroma,
@@ -1738,7 +1641,7 @@ export async function analyzeWavBuffer(
 
 
   /* =====================================
-     4. REMOVER FRAMES SEM HARMONIA
+     4. NORMALIZAR FRAMES SEM HARMONIA
   ===================================== */
 
   const usefulFrames =
@@ -1854,11 +1757,13 @@ export function createChromaTest(
       chromaToNotes(
         chroma,
         {
+
           threshold:
             0.5,
 
           maxNotes:
             6
+
         }
       )
 
