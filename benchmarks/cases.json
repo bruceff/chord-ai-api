@@ -1,0 +1,46 @@
+{
+  "version": 1,
+  "regressionTolerance": {
+    "chordAccuracy": 0.005,
+    "rootAccuracy": 0.005,
+    "qualityAccuracy": 0.005,
+    "bassAccuracy": 0.005,
+    "boundaryF1": 0.01
+  },
+  "cases": [
+    {
+      "id": "A",
+      "name": "Regressão harmônica",
+      "file": "benchmarks/benchmark-a.wav",
+      "duration": 20,
+      "boundaryToleranceSeconds": 0.3,
+      "expected": [
+        { "start": 0.0, "end": 2.4, "chord": "Dm7" },
+        { "start": 2.4, "end": 5.0, "chord": "G7" },
+        { "start": 5.0, "end": 7.4, "chord": "Cmaj7" },
+        { "start": 7.4, "end": 10.0, "chord": "Am7" },
+        { "start": 10.0, "end": 12.4, "chord": "Fmaj7" },
+        { "start": 12.4, "end": 15.0, "chord": "Bm7b5" },
+        { "start": 15.0, "end": 17.4, "chord": "E7" },
+        { "start": 17.4, "end": 20.0, "chord": "Am" }
+      ]
+    },
+    {
+      "id": "B",
+      "name": "Inversões e slash chords",
+      "file": "benchmarks/benchmark-b.wav",
+      "duration": 20,
+      "boundaryToleranceSeconds": 0.3,
+      "expected": [
+        { "start": 0.0, "end": 2.4, "chord": "C/E" },
+        { "start": 2.4, "end": 5.0, "chord": "G/B" },
+        { "start": 5.0, "end": 7.4, "chord": "Am/C" },
+        { "start": 7.4, "end": 10.0, "chord": "F/A" },
+        { "start": 10.0, "end": 12.4, "chord": "Dm/F" },
+        { "start": 12.4, "end": 15.0, "chord": "G7/F" },
+        { "start": 15.0, "end": 17.4, "chord": "C/G" },
+        { "start": 17.4, "end": 20.0, "chord": "C" }
+      ]
+    }
+  ]
+}
