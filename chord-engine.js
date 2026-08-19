@@ -1,17 +1,16 @@
 /* =========================================
-   CHORD AI — CHORD ENGINE v9
+   CHORD AI — CHORD ENGINE v10
 
    Base:
-   - comportamento estável do v7
+   - v9
 
    Novidades:
-   - baixo NÃO domina o score
-   - bassNote/bassChroma só desempata
-     candidatos próximos
-   - confiança baseada em:
-       score absoluto
-       + margem para 2º colocado
-   - decoder temporal mantido
+   - conservative bass correction
+   - ambiguity resolver
+   - m7b5 correction
+   - dominant vs diminished correction
+   - bass cannot dominate harmonic score
+   - realistic confidence
 ========================================= */
 
 
@@ -196,7 +195,9 @@ function noteIndex(
 ){
 
   const normalized =
-    normalizeNote(note);
+    normalizeNote(
+      note
+    );
 
 
   if(!normalized)
@@ -236,8 +237,10 @@ function normalizeVector12(
             Number(value);
 
           return Number.isFinite(n)
-            ? Math.max(0,n)
-            : 0;
+            ?
+            Math.max(0,n)
+            :
+            0;
 
         }
       );
@@ -278,25 +281,6 @@ function normalizeChroma(
 }
 
 
-function pitchDistance(
-  a,
-  b
-){
-
-  const diff =
-    Math.abs(
-      a - b
-    );
-
-
-  return Math.min(
-    diff,
-    12 - diff
-  );
-
-}
-
-
 /* =========================================
    PITCH CLASSES
 ========================================= */
@@ -308,8 +292,8 @@ function getPitchClasses(
   return [
     ...new Set(
       intervals.map(
-        value =>
-          value % 12
+        interval =>
+          interval % 12
       )
     )
   ];
@@ -468,7 +452,8 @@ function normalizeQuality(
     return "AUG";
 
 
-  return value.toUpperCase();
+  return value
+    .toUpperCase();
 
 }
 
@@ -575,7 +560,9 @@ export function transposeNote(
 ){
 
   const index =
-    noteIndex(note);
+    noteIndex(
+      note
+    );
 
 
   if(index < 0)
@@ -586,7 +573,9 @@ export function transposeNote(
     (
       index
       +
-      Number(semitones)
+      Number(
+        semitones
+      )
     ) % 12;
 
 
@@ -847,7 +836,7 @@ function scoreChordTemplate(
     );
 
 
-  const set =
+  const pitchSet =
     new Set(
       pitches
     );
@@ -878,7 +867,7 @@ function scoreChordTemplate(
   ){
 
     if(
-      !set.has(i)
+      !pitchSet.has(i)
     ){
 
       outsideEnergy +=
@@ -961,7 +950,7 @@ function scoreChordTemplate(
   }
 
 
-  /* ENERGIA FORA */
+  /* ENERGIA EXTERNA */
 
   score -=
     (
@@ -971,7 +960,7 @@ function scoreChordTemplate(
     0.13;
 
 
-  /* NOTAS FRACAS */
+  /* NOTAS ESTRUTURAIS FRACAS */
 
   const weakCount =
     structural.filter(
@@ -1004,7 +993,7 @@ function scoreChordTemplate(
     ){
 
       if(
-        !set.has(i)
+        !pitchSet.has(i)
         &&
         chroma[i] >= 0.43
       ){
@@ -1060,9 +1049,6 @@ function scoreChordTemplate(
 
   /* =====================================
      DIMINUTOS
-
-     Penalidade leve porque são
-     muito ambíguos.
   ===================================== */
 
   if(
@@ -1093,7 +1079,9 @@ function scoreChordTemplate(
   }
 
 
-  /* BALANÇO */
+  /* =====================================
+     BALANÇO
+  ===================================== */
 
   if(
     strongest > 0
@@ -1125,7 +1113,11 @@ function scoreChordTemplate(
 
     rootEnergy,
 
-    explained
+    explained,
+
+    insideEnergy,
+
+    outsideEnergy
 
   };
 
@@ -1202,7 +1194,13 @@ function buildBaseCandidates(
           ),
 
         score:
-          result.score
+          result.score,
+
+        rootEnergy:
+          result.rootEnergy,
+
+        explained:
+          result.explained
 
       });
 
@@ -1225,15 +1223,63 @@ function buildBaseCandidates(
 
 
 /* =========================================
-   BASS TIE BREAKER
-
-   MUITO IMPORTANTE:
-
-   O baixo só altera o resultado quando
-   os candidatos estão próximos.
+   MESMO CONJUNTO DE NOTAS
 ========================================= */
 
-function applyBassTieBreaker(
+function samePitchSet(
+  a,
+  b
+){
+
+  if(
+    !a
+    ||
+    !b
+    ||
+    !Array.isArray(a.notes)
+    ||
+    !Array.isArray(b.notes)
+  ){
+
+    return false;
+
+  }
+
+
+  if(
+    a.notes.length !==
+    b.notes.length
+  ){
+
+    return false;
+
+  }
+
+
+  const aa =
+    [...a.notes]
+      .sort();
+
+
+  const bb =
+    [...b.notes]
+      .sort();
+
+
+  return aa.every(
+    (note,index) =>
+      note ===
+      bb[index]
+  );
+
+}
+
+
+/* =========================================
+   BAIXO CONSERVADOR
+========================================= */
+
+function applyConservativeBass(
   candidates,
   bassNote,
   bassChroma
@@ -1274,13 +1320,7 @@ function applyBassTieBreaker(
 
 
   const sorted =
-    [...candidates]
-      .sort(
-        (a,b) =>
-          b.score
-          -
-          a.score
-      );
+    [...candidates];
 
 
   const bestScore =
@@ -1288,14 +1328,11 @@ function applyBassTieBreaker(
 
 
   /*
-    Só consideramos candidatos
-    próximos do vencedor.
-
-    Se estiver 0.20 abaixo, o baixo
-    NÃO tem poder para virar o jogo.
+    Só candidatos próximos recebem
+    qualquer influência do baixo.
   */
 
-  const closeCandidates =
+  const close =
     sorted.filter(
       candidate =>
         (
@@ -1304,49 +1341,30 @@ function applyBassTieBreaker(
           candidate.score
         )
         <=
-        0.10
+        0.085
     );
 
 
   for(
     const candidate
-    of closeCandidates
+    of close
   ){
 
     let bonus = 0;
 
 
-    /* BASS NOTE */
-
     if(
       bassIndex >= 0
+      &&
+      candidate.rootIndex ===
+      bassIndex
     ){
 
-      if(
-        candidate.rootIndex ===
-        bassIndex
-      ){
-
-        bonus +=
-          0.055;
-
-      }
-
-      else if(
-        candidate.notes.includes(
-          NOTES[bassIndex]
-        )
-      ){
-
-        bonus +=
-          0.008;
-
-      }
+      bonus +=
+        0.035;
 
     }
 
-
-    /* BASS CHROMA */
 
     if(
       bassVector
@@ -1357,7 +1375,7 @@ function applyBassTieBreaker(
           candidate.rootIndex
         ]
         *
-        0.025;
+        0.012;
 
     }
 
@@ -1382,14 +1400,18 @@ function applyBassTieBreaker(
 
 
 /* =========================================
-   ROOT-FAMILY CORRECTION
+   AMBIGUIDADE POR MESMAS NOTAS
 
-   Só compara candidatos já muito próximos.
+   Ex:
+   Am7 = A C E G
+   C6  = C E G A
+
+   Só usamos o baixo se ele realmente
+   aponta para uma das raízes candidatas.
 ========================================= */
 
-function applyFamilyCorrections(
+function resolveEquivalentPitchSets(
   candidates,
-  chroma,
   bassNote
 ){
 
@@ -1404,16 +1426,19 @@ function applyFamilyCorrections(
   }
 
 
-  const normalized =
-    normalizeChroma(
-      chroma
-    );
-
-
   const bassIndex =
     noteIndex(
       bassNote
     );
+
+
+  if(
+    bassIndex < 0
+  ){
+
+    return candidates;
+
+  }
 
 
   const sorted =
@@ -1424,36 +1449,291 @@ function applyFamilyCorrections(
     sorted[0];
 
 
-  const nearby =
-    sorted.filter(
-      candidate =>
-        (
-          leader.score
-          -
-          candidate.score
-        )
-        <=
-        0.085
+  for(
+    let i = 1;
+    i < Math.min(
+      8,
+      sorted.length
+    );
+    i++
+  ){
+
+    const alternative =
+      sorted[i];
+
+
+    const difference =
+      leader.score
+      -
+      alternative.score;
+
+
+    if(
+      difference >
+      0.075
+    ){
+
+      continue;
+
+    }
+
+
+    if(
+      !samePitchSet(
+        leader,
+        alternative
+      )
+    ){
+
+      continue;
+
+    }
+
+
+    if(
+      alternative.rootIndex ===
+      bassIndex
+    ){
+
+      alternative.score +=
+        0.045;
+
+    }
+
+  }
+
+
+  sorted.sort(
+    (a,b) =>
+      b.score
+      -
+      a.score
+  );
+
+
+  return sorted;
+
+}
+
+
+/* =========================================
+   M7B5 CORRECTION
+
+   Caso atual:
+   A#maj7 vs Bm7b5
+
+   Aqui sabemos que o Bass Detector
+   encontrou B corretamente.
+
+   Mas a correção continua conservadora:
+   o m7b5 precisa já estar próximo.
+========================================= */
+
+function resolveHalfDiminished(
+  candidates,
+  bassNote,
+  chroma
+){
+
+  if(
+    !Array.isArray(candidates)
+    ||
+    candidates.length === 0
+  ){
+
+    return candidates;
+
+  }
+
+
+  const bassIndex =
+    noteIndex(
+      bassNote
     );
 
 
-  /* =====================================
-     DOMINANTE 7 vs DIMINUTO
+  if(
+    bassIndex < 0
+  ){
 
-     E7 vs G#dim/Bdim etc.
+    return candidates;
 
-     Só mexe se o dominante já estiver
-     muito perto do vencedor.
-  ===================================== */
+  }
+
+
+  const normalized =
+    normalizeChroma(
+      chroma
+    );
+
+
+  const sorted =
+    [...candidates];
+
+
+  const leaderScore =
+    sorted[0].score;
+
 
   for(
     const candidate
-    of nearby
+    of sorted
+  ){
+
+    if(
+      candidate.quality !==
+      "MIN7B5"
+    ){
+
+      continue;
+
+    }
+
+
+    if(
+      candidate.rootIndex !==
+      bassIndex
+    ){
+
+      continue;
+
+    }
+
+
+    const difference =
+      leaderScore
+      -
+      candidate.score;
+
+
+    if(
+      difference >
+      0.12
+    ){
+
+      continue;
+
+    }
+
+
+    /*
+      Também exigimos alguma energia
+      real na root dentro do chroma.
+    */
+
+    const rootEnergy =
+      normalized
+      ?
+      normalized[
+        candidate.rootIndex
+      ]
+      :
+      0;
+
+
+    if(
+      rootEnergy <
+      0.22
+    ){
+
+      continue;
+
+    }
+
+
+    candidate.score +=
+      0.085;
+
+  }
+
+
+  sorted.sort(
+    (a,b) =>
+      b.score
+      -
+      a.score
+  );
+
+
+  return sorted;
+
+}
+
+
+/* =========================================
+   DOMINANTE vs DIMINUTO
+
+   Ex:
+   E7 = E G# B D
+   G#dim/Bdim/Ddim podem aparecer.
+
+   Só corrige se:
+   - E7 já está perto
+   - E tem energia
+   - baixo aponta para E
+========================================= */
+
+function resolveDominantVsDiminished(
+  candidates,
+  bassNote,
+  chroma
+){
+
+  if(
+    !Array.isArray(candidates)
+    ||
+    candidates.length === 0
+  ){
+
+    return candidates;
+
+  }
+
+
+  const bassIndex =
+    noteIndex(
+      bassNote
+    );
+
+
+  const normalized =
+    normalizeChroma(
+      chroma
+    );
+
+
+  const sorted =
+    [...candidates];
+
+
+  const leaderScore =
+    sorted[0].score;
+
+
+  for(
+    const candidate
+    of sorted
   ){
 
     if(
       candidate.quality !==
       "7"
+    ){
+
+      continue;
+
+    }
+
+
+    const difference =
+      leaderScore
+      -
+      candidate.score;
+
+
+    if(
+      difference >
+      0.10
     ){
 
       continue;
@@ -1472,96 +1752,22 @@ function applyFamilyCorrections(
 
 
     if(
-      (
-        bassIndex ===
-        candidate.rootIndex
-        ||
-        rootEnergy >= 0.60
-      )
+      rootEnergy <
+      0.30
     ){
 
-      candidate.score +=
-        0.035;
+      continue;
 
     }
 
-  }
-
-
-  /* =====================================
-     MIN7 vs 6
-
-     Dm7 vs F6
-     Am7 vs C6
-  ===================================== */
-
-  for(
-    const candidate
-    of nearby
-  ){
 
     if(
-      candidate.quality ===
-      "MIN7"
-      &&
       bassIndex ===
       candidate.rootIndex
     ){
 
       candidate.score +=
-        0.035;
-
-    }
-
-  }
-
-
-  /* =====================================
-     MAJ7
-
-     Cmaj7 vs vizinho estranho.
-  ===================================== */
-
-  for(
-    const candidate
-    of nearby
-  ){
-
-    if(
-      candidate.quality ===
-      "MAJ7"
-      &&
-      bassIndex ===
-      candidate.rootIndex
-    ){
-
-      candidate.score +=
-        0.03;
-
-    }
-
-  }
-
-
-  /* =====================================
-     MIN7B5
-  ===================================== */
-
-  for(
-    const candidate
-    of nearby
-  ){
-
-    if(
-      candidate.quality ===
-      "MIN7B5"
-      &&
-      bassIndex ===
-      candidate.rootIndex
-    ){
-
-      candidate.score +=
-        0.04;
+        0.045;
 
     }
 
@@ -1619,10 +1825,6 @@ function calculateConfidence(
     second.score;
 
 
-  /*
-    Base absoluta.
-  */
-
   const absolute =
     clamp(
       (
@@ -1637,13 +1839,6 @@ function calculateConfidence(
     );
 
 
-  /*
-    Margem para o segundo colocado.
-
-    Uma diferença de 0.15 já é
-    relativamente forte.
-  */
-
   const separation =
     clamp(
       margin
@@ -1653,10 +1848,6 @@ function calculateConfidence(
       1
     );
 
-
-  /*
-    Não queremos 100% com facilidade.
-  */
 
   const confidence =
     absolute * 0.58
@@ -1691,8 +1882,17 @@ export function detectChordCandidatesFromChroma(
     );
 
 
+  /*
+    Ordem importante.
+
+    1. influência leve do baixo
+    2. mesmas notas
+    3. m7b5
+    4. dominante/diminuto
+  */
+
   candidates =
-    applyBassTieBreaker(
+    applyConservativeBass(
       candidates,
       options.bassNote,
       options.bassChroma
@@ -1700,10 +1900,25 @@ export function detectChordCandidatesFromChroma(
 
 
   candidates =
-    applyFamilyCorrections(
+    resolveEquivalentPitchSets(
       candidates,
-      chroma,
       options.bassNote
+    );
+
+
+  candidates =
+    resolveHalfDiminished(
+      candidates,
+      options.bassNote,
+      chroma
+    );
+
+
+  candidates =
+    resolveDominantVsDiminished(
+      candidates,
+      options.bassNote,
+      chroma
     );
 
 
@@ -1739,14 +1954,6 @@ export function detectChordCandidatesFromChroma(
     )
     .map(
       (candidate,index) => {
-
-        /*
-          Só o primeiro usa a confiança
-          global completa.
-
-          Alternativas recebem uma
-          representação comparativa.
-        */
 
         let confidence;
 
@@ -1958,7 +2165,7 @@ export function detectChord(
 
 
 /* =========================================
-   DECODER TEMPORAL v9
+   DECODER TEMPORAL v10
 ========================================= */
 
 export function decodeChordSequenceFromChroma(
@@ -2256,18 +2463,18 @@ export function decodeChordSequenceFromChroma(
 
 
         /*
-          Baixo NÃO troca o acorde.
+          Bass recebe bônus minúsculo
+          na transição.
 
-          Só dá bônus pequeno se o novo
-          candidato já foi escolhido
-          harmonicamente e sua root bate
-          com o baixo.
+          Ele nunca pode ressuscitar
+          candidato harmonicamente ruim.
         */
 
         if(
           candidate
           &&
-          validFrames[t].bassNote
+          validFrames[t]
+            .bassNote
         ){
 
           const bassIndex =
@@ -2283,7 +2490,7 @@ export function decodeChordSequenceFromChroma(
           ){
 
             transition +=
-              0.018;
+              0.012;
 
           }
 
@@ -2434,7 +2641,8 @@ export function decodeChordSequenceFromChroma(
         [],
 
       bassNote:
-        validFrames[t].bassNote
+        validFrames[t]
+          .bassNote
         ||
         null
 
@@ -3085,7 +3293,9 @@ export function getChordAtTime(
 ){
 
   if(
-    !Array.isArray(timeline)
+    !Array.isArray(
+      timeline
+    )
   ){
 
     return null;
