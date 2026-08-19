@@ -1,13 +1,17 @@
 /* =========================================
-   CHORD AI — CHORD ENGINE v8
+   CHORD AI — CHORD ENGINE v9
+
+   Base:
+   - comportamento estável do v7
 
    Novidades:
-   - Root Consensus v2
-   - Root Correction
-   - Correção de acordes vizinhos
-   - Correção dominante vs diminuto
-   - Correção m7b5 vs maj7 vizinho
-   - Decoder temporal mantido
+   - baixo NÃO domina o score
+   - bassNote/bassChroma só desempata
+     candidatos próximos
+   - confiança baseada em:
+       score absoluto
+       + margem para 2º colocado
+   - decoder temporal mantido
 ========================================= */
 
 
@@ -245,7 +249,9 @@ function normalizeVector12(
     );
 
 
-  if(max <= 0){
+  if(
+    max <= 0
+  ){
 
     return new Array(12)
       .fill(0);
@@ -287,18 +293,6 @@ function pitchDistance(
     diff,
     12 - diff
   );
-
-}
-
-
-function circularDistanceForward(
-  from,
-  to
-){
-
-  return (
-    to - from + 12
-  ) % 12;
 
 }
 
@@ -826,212 +820,14 @@ function isDiminishedQuality(
 
 
 /* =========================================
-   ROOT CONSENSUS v2
-========================================= */
-
-function getRootConsensus(
-  chroma,
-  bassChroma,
-  bassNote
-){
-
-  const harmonic =
-    normalizeChroma(
-      chroma
-    );
-
-
-  const bass =
-    normalizeVector12(
-      bassChroma
-    );
-
-
-  const result =
-    new Array(12)
-      .fill(0);
-
-
-  const bassIndex =
-    noteIndex(
-      bassNote
-    );
-
-
-  for(
-    let i = 0;
-    i < 12;
-    i++
-  ){
-
-    /*
-      Chroma geral.
-    */
-
-    if(harmonic){
-
-      result[i] +=
-        harmonic[i]
-        *
-        0.25;
-
-    }
-
-
-    /*
-      Região grave.
-    */
-
-    if(bass){
-
-      result[i] +=
-        bass[i]
-        *
-        0.50;
-
-    }
-
-
-    /*
-      Nota grave detectada.
-    */
-
-    if(
-      bassIndex === i
-    ){
-
-      result[i] +=
-        0.62;
-
-    }
-
-  }
-
-
-  const max =
-    Math.max(
-      ...result
-    );
-
-
-  if(max > 0){
-
-    for(
-      let i = 0;
-      i < 12;
-      i++
-    ){
-
-      result[i] /=
-        max;
-
-    }
-
-  }
-
-
-  return result;
-
-}
-
-
-/* =========================================
-   SCORE DA FUNDAMENTAL
-========================================= */
-
-function scoreRoot(
-  rootIndex,
-  rootConsensus,
-  bassNote,
-  bassChroma
-){
-
-  let score = 0;
-
-
-  const bassIndex =
-    noteIndex(
-      bassNote
-    );
-
-
-  const bass =
-    normalizeVector12(
-      bassChroma
-    );
-
-
-  if(rootConsensus){
-
-    score +=
-      rootConsensus[
-        rootIndex
-      ]
-      *
-      0.34;
-
-  }
-
-
-  if(
-    bassIndex >= 0
-  ){
-
-    if(
-      bassIndex === rootIndex
-    ){
-
-      score +=
-        0.26;
-
-    }
-
-    else{
-
-      const distance =
-        pitchDistance(
-          rootIndex,
-          bassIndex
-        );
-
-
-      score -=
-        distance
-        *
-        0.014;
-
-    }
-
-  }
-
-
-  if(bass){
-
-    score +=
-      bass[
-        rootIndex
-      ]
-      *
-      0.18;
-
-  }
-
-
-  return score;
-
-}
-
-
-/* =========================================
-   SCORE HARMÔNICO
+   SCORE HARMÔNICO BASE
 ========================================= */
 
 function scoreChordTemplate(
   chroma,
   rootIndex,
   quality,
-  intervals,
-  context = {}
+  intervals
 ){
 
   const relative =
@@ -1125,31 +921,38 @@ function scoreChordTemplate(
     );
 
 
-  let score =
-    averageInside * 0.30
-    +
-    explained * 0.25
-    +
-    rootEnergy * 0.07
-    +
-    weakest * 0.05;
-
-
-  score +=
-    scoreRoot(
-      rootIndex,
-      context.rootConsensus,
-      context.bassNote,
-      context.bassChroma
+  const strongest =
+    Math.max(
+      ...structural
     );
 
 
-  /* =====================================
-     ROOT AUSENTE
-  ===================================== */
+  let score =
+    averageInside * 0.39
+    +
+    explained * 0.32
+    +
+    rootEnergy * 0.10
+    +
+    weakest * 0.07;
+
+
+  /* ROOT PRESENTE */
 
   if(
-    rootEnergy < 0.10
+    rootEnergy >= 0.50
+  ){
+
+    score +=
+      0.045;
+
+  }
+
+
+  /* ROOT AUSENTE */
+
+  if(
+    rootEnergy < 0.12
   ){
 
     score -=
@@ -1158,16 +961,29 @@ function scoreChordTemplate(
   }
 
 
-  /* =====================================
-     OUTSIDE ENERGY
-  ===================================== */
+  /* ENERGIA FORA */
 
   score -=
     (
       outsideEnergy / 12
     )
     *
-    0.11;
+    0.13;
+
+
+  /* NOTAS FRACAS */
+
+  const weakCount =
+    structural.filter(
+      energy =>
+        energy < 0.15
+    ).length;
+
+
+  score -=
+    weakCount
+    *
+    0.05;
 
 
   /* =====================================
@@ -1190,7 +1006,7 @@ function scoreChordTemplate(
       if(
         !set.has(i)
         &&
-        chroma[i] >= 0.42
+        chroma[i] >= 0.43
       ){
 
         strongOutside++;
@@ -1203,7 +1019,7 @@ function scoreChordTemplate(
     score -=
       strongOutside
       *
-      0.06;
+      0.065;
 
   }
 
@@ -1229,11 +1045,24 @@ function scoreChordTemplate(
 
     }
 
+
+    if(
+      fourth >= 0.50
+    ){
+
+      score +=
+        0.025;
+
+    }
+
   }
 
 
   /* =====================================
      DIMINUTOS
+
+     Penalidade leve porque são
+     muito ambíguos.
   ===================================== */
 
   if(
@@ -1242,128 +1071,8 @@ function scoreChordTemplate(
     )
   ){
 
-    const rootSupport =
-      context.rootConsensus
-      ?
-      context.rootConsensus[
-        rootIndex
-      ]
-      :
-      0;
-
-
-    if(
-      rootSupport < 0.50
-    ){
-
-      score -=
-        0.10;
-
-    }
-
-  }
-
-
-  /* =====================================
-     DOMINANTE 7
-  ===================================== */
-
-  if(
-    quality === "7"
-  ){
-
-    const bassIndex =
-      noteIndex(
-        context.bassNote
-      );
-
-
-    if(
-      bassIndex === rootIndex
-    ){
-
-      score +=
-        0.10;
-
-    }
-
-  }
-
-
-  /* =====================================
-     MIN7
-  ===================================== */
-
-  if(
-    quality === "MIN7"
-  ){
-
-    const bassIndex =
-      noteIndex(
-        context.bassNote
-      );
-
-
-    if(
-      bassIndex === rootIndex
-    ){
-
-      score +=
-        0.095;
-
-    }
-
-  }
-
-
-  /* =====================================
-     MAJ7
-  ===================================== */
-
-  if(
-    quality === "MAJ7"
-  ){
-
-    const bassIndex =
-      noteIndex(
-        context.bassNote
-      );
-
-
-    if(
-      bassIndex === rootIndex
-    ){
-
-      score +=
-        0.09;
-
-    }
-
-  }
-
-
-  /* =====================================
-     M7B5
-  ===================================== */
-
-  if(
-    quality === "MIN7B5"
-  ){
-
-    const bassIndex =
-      noteIndex(
-        context.bassNote
-      );
-
-
-    if(
-      bassIndex === rootIndex
-    ){
-
-      score +=
-        0.11;
-
-    }
+    score -=
+      0.025;
 
   }
 
@@ -1379,7 +1088,31 @@ function scoreChordTemplate(
   ){
 
     score -=
-      0.025;
+      0.03;
+
+  }
+
+
+  /* BALANÇO */
+
+  if(
+    strongest > 0
+  ){
+
+    const balance =
+      weakest
+      /
+      strongest;
+
+
+    if(
+      balance < 0.13
+    ){
+
+      score -=
+        0.035;
+
+    }
 
   }
 
@@ -1400,12 +1133,11 @@ function scoreChordTemplate(
 
 
 /* =========================================
-   CRIAR CANDIDATOS
+   CRIAR CANDIDATOS BASE
 ========================================= */
 
-function buildCandidates(
-  chroma,
-  options = {}
+function buildBaseCandidates(
+  chroma
 ){
 
   const normalized =
@@ -1416,14 +1148,6 @@ function buildCandidates(
 
   if(!normalized)
     return [];
-
-
-  const rootConsensus =
-    getRootConsensus(
-      normalized,
-      options.bassChroma,
-      options.bassNote
-    );
 
 
   const candidates = [];
@@ -1451,36 +1175,21 @@ function buildCandidates(
           normalized,
           rootIndex,
           quality,
-          intervals,
-          {
-
-            rootConsensus,
-
-            bassNote:
-              options.bassNote,
-
-            bassChroma:
-              options.bassChroma
-
-          }
+          intervals
         );
 
 
       candidates.push({
 
         chord:
-          NOTES[
-            rootIndex
-          ]
+          NOTES[rootIndex]
           +
           qualityToSymbol(
             quality
           ),
 
         root:
-          NOTES[
-            rootIndex
-          ],
+          NOTES[rootIndex],
 
         rootIndex,
 
@@ -1493,17 +1202,7 @@ function buildCandidates(
           ),
 
         score:
-          result.score,
-
-        rootConsensus:
-          rootConsensus[
-            rootIndex
-          ],
-
-        bassNote:
-          options.bassNote
-          ||
-          null
+          result.score
 
       });
 
@@ -1512,20 +1211,186 @@ function buildCandidates(
   }
 
 
+  candidates.sort(
+    (a,b) =>
+      b.score
+      -
+      a.score
+  );
+
+
   return candidates;
 
 }
 
 
 /* =========================================
-   ROOT CORRECTION v8
+   BASS TIE BREAKER
+
+   MUITO IMPORTANTE:
+
+   O baixo só altera o resultado quando
+   os candidatos estão próximos.
 ========================================= */
 
-function applyRootCorrection(
+function applyBassTieBreaker(
   candidates,
-  chroma,
   bassNote,
   bassChroma
+){
+
+  if(
+    !Array.isArray(candidates)
+    ||
+    candidates.length < 2
+  ){
+
+    return candidates;
+
+  }
+
+
+  const bassIndex =
+    noteIndex(
+      bassNote
+    );
+
+
+  const bassVector =
+    normalizeVector12(
+      bassChroma
+    );
+
+
+  if(
+    bassIndex < 0
+    &&
+    !bassVector
+  ){
+
+    return candidates;
+
+  }
+
+
+  const sorted =
+    [...candidates]
+      .sort(
+        (a,b) =>
+          b.score
+          -
+          a.score
+      );
+
+
+  const bestScore =
+    sorted[0].score;
+
+
+  /*
+    Só consideramos candidatos
+    próximos do vencedor.
+
+    Se estiver 0.20 abaixo, o baixo
+    NÃO tem poder para virar o jogo.
+  */
+
+  const closeCandidates =
+    sorted.filter(
+      candidate =>
+        (
+          bestScore
+          -
+          candidate.score
+        )
+        <=
+        0.10
+    );
+
+
+  for(
+    const candidate
+    of closeCandidates
+  ){
+
+    let bonus = 0;
+
+
+    /* BASS NOTE */
+
+    if(
+      bassIndex >= 0
+    ){
+
+      if(
+        candidate.rootIndex ===
+        bassIndex
+      ){
+
+        bonus +=
+          0.055;
+
+      }
+
+      else if(
+        candidate.notes.includes(
+          NOTES[bassIndex]
+        )
+      ){
+
+        bonus +=
+          0.008;
+
+      }
+
+    }
+
+
+    /* BASS CHROMA */
+
+    if(
+      bassVector
+    ){
+
+      bonus +=
+        bassVector[
+          candidate.rootIndex
+        ]
+        *
+        0.025;
+
+    }
+
+
+    candidate.score +=
+      bonus;
+
+  }
+
+
+  sorted.sort(
+    (a,b) =>
+      b.score
+      -
+      a.score
+  );
+
+
+  return sorted;
+
+}
+
+
+/* =========================================
+   ROOT-FAMILY CORRECTION
+
+   Só compara candidatos já muito próximos.
+========================================= */
+
+function applyFamilyCorrections(
+  candidates,
+  chroma,
+  bassNote
 ){
 
   if(
@@ -1551,110 +1416,39 @@ function applyRootCorrection(
     );
 
 
-  const bass =
-    normalizeVector12(
-      bassChroma
-    );
-
-
   const sorted =
-    [...candidates]
-      .sort(
-        (a,b) =>
-          b.score
-          -
-          a.score
-      );
+    [...candidates];
 
 
-  let best =
+  const leader =
     sorted[0];
 
 
-  /* =====================================
-     REGRA 1:
-     VENCEDOR COM ROOT A 1 SEMITOM
-     DO BAIXO
-  ===================================== */
-
-  if(
-    bassIndex >= 0
-    &&
-    best.rootIndex !==
-    bassIndex
-  ){
-
-    const distance =
-      pitchDistance(
-        best.rootIndex,
-        bassIndex
-      );
-
-
-    if(
-      distance === 1
-    ){
-
-      const bassRootCandidates =
-        sorted.filter(
-          candidate =>
-            candidate.rootIndex ===
-            bassIndex
-        );
-
-
-      if(
-        bassRootCandidates.length > 0
-      ){
-
-        const alternative =
-          bassRootCandidates[0];
-
-
-        const scoreDifference =
-          best.score
+  const nearby =
+    sorted.filter(
+      candidate =>
+        (
+          leader.score
           -
-          alternative.score;
-
-
-        /*
-          Se estiver muito próximo,
-          preferimos a root indicada
-          pelo baixo.
-        */
-
-        if(
-          scoreDifference <
-          0.18
-        ){
-
-          alternative.score +=
-            0.20;
-
-        }
-
-      }
-
-    }
-
-  }
+          candidate.score
+        )
+        <=
+        0.085
+    );
 
 
   /* =====================================
-     REGRA 2:
-     DOMINANTE 7 vs DIMINUTO CONTIDO
+     DOMINANTE 7 vs DIMINUTO
 
-     Ex:
-     E7 = E G# B D
-     G#dim = G# B D
+     E7 vs G#dim/Bdim etc.
 
-     Se E aparece forte no baixo/chroma,
-     E7 deve vencer.
+     Só mexe se o dominante já estiver
+     muito perto do vencedor.
   ===================================== */
 
   for(
     const candidate
-    of sorted
+    of nearby
   ){
 
     if(
@@ -1667,38 +1461,27 @@ function applyRootCorrection(
     }
 
 
-    const root =
-      candidate.rootIndex;
-
-
     const rootEnergy =
       normalized
       ?
-      normalized[root]
-      :
-      0;
-
-
-    const bassEnergy =
-      bass
-      ?
-      bass[root]
+      normalized[
+        candidate.rootIndex
+      ]
       :
       0;
 
 
     if(
-      rootEnergy >= 0.35
-      &&
       (
-        bassIndex === root
+        bassIndex ===
+        candidate.rootIndex
         ||
-        bassEnergy >= 0.55
+        rootEnergy >= 0.60
       )
     ){
 
       candidate.score +=
-        0.16;
+        0.035;
 
     }
 
@@ -1706,144 +1489,84 @@ function applyRootCorrection(
 
 
   /* =====================================
-     REGRA 3:
-     MIN7B5 vs MAJ7 VIZINHO
+     MIN7 vs 6
 
-     Ex:
-     Bm7b5 vs A#maj7
-
-     Se o baixo aponta para B,
-     damos vantagem forte ao Bm7b5.
+     Dm7 vs F6
+     Am7 vs C6
   ===================================== */
 
-  if(
-    bassIndex >= 0
+  for(
+    const candidate
+    of nearby
   ){
-
-    for(
-      const candidate
-      of sorted
-    ){
-
-      if(
-        candidate.rootIndex ===
-        bassIndex
-        &&
-        candidate.quality ===
-        "MIN7B5"
-      ){
-
-        candidate.score +=
-          0.17;
-
-      }
-
-    }
-
-  }
-
-
-  /* =====================================
-     REGRA 4:
-     MAJ7 com root do baixo
-  ===================================== */
-
-  if(
-    bassIndex >= 0
-  ){
-
-    for(
-      const candidate
-      of sorted
-    ){
-
-      if(
-        candidate.rootIndex ===
-        bassIndex
-        &&
-        candidate.quality ===
-        "MAJ7"
-      ){
-
-        candidate.score +=
-          0.13;
-
-      }
-
-    }
-
-  }
-
-
-  /* =====================================
-     REGRA 5:
-     ROOT FORTE NO CHROMA
-
-     Se uma nota candidata à root está
-     muito forte e o vencedor atual está
-     deslocado um semitom, corrigimos.
-  ===================================== */
-
-  if(normalized){
-
-    const strongestRootIndex =
-      normalized.indexOf(
-        Math.max(
-          ...normalized
-        )
-      );
-
-
-    const distance =
-      pitchDistance(
-        best.rootIndex,
-        strongestRootIndex
-      );
-
 
     if(
-      distance === 1
+      candidate.quality ===
+      "MIN7"
+      &&
+      bassIndex ===
+      candidate.rootIndex
     ){
 
-      const rootCandidates =
-        sorted.filter(
-          candidate =>
-            candidate.rootIndex ===
-            strongestRootIndex
-        );
-
-
-      if(
-        rootCandidates.length
-      ){
-
-        const alternative =
-          rootCandidates[0];
-
-
-        if(
-          best.score
-          -
-          alternative.score
-          <
-          0.12
-        ){
-
-          alternative.score +=
-            0.13;
-
-        }
-
-      }
+      candidate.score +=
+        0.035;
 
     }
 
   }
 
 
-  /*
-    Reordena depois das correções.
-  */
+  /* =====================================
+     MAJ7
+
+     Cmaj7 vs vizinho estranho.
+  ===================================== */
+
+  for(
+    const candidate
+    of nearby
+  ){
+
+    if(
+      candidate.quality ===
+      "MAJ7"
+      &&
+      bassIndex ===
+      candidate.rootIndex
+    ){
+
+      candidate.score +=
+        0.03;
+
+    }
+
+  }
+
+
+  /* =====================================
+     MIN7B5
+  ===================================== */
+
+  for(
+    const candidate
+    of nearby
+  ){
+
+    if(
+      candidate.quality ===
+      "MIN7B5"
+      &&
+      bassIndex ===
+      candidate.rootIndex
+    ){
+
+      candidate.score +=
+        0.04;
+
+    }
+
+  }
+
 
   sorted.sort(
     (a,b) =>
@@ -1859,6 +1582,101 @@ function applyRootCorrection(
 
 
 /* =========================================
+   CONFIANÇA REALISTA
+========================================= */
+
+function calculateConfidence(
+  candidates
+){
+
+  if(
+    !Array.isArray(candidates)
+    ||
+    candidates.length === 0
+  ){
+
+    return 0;
+
+  }
+
+
+  const best =
+    candidates[0];
+
+
+  const second =
+    candidates[1]
+    ||
+    {
+      score:
+        best.score - 0.5
+    };
+
+
+  const margin =
+    best.score
+    -
+    second.score;
+
+
+  /*
+    Base absoluta.
+  */
+
+  const absolute =
+    clamp(
+      (
+        best.score
+        -
+        0.20
+      )
+      /
+      0.70,
+      0,
+      1
+    );
+
+
+  /*
+    Margem para o segundo colocado.
+
+    Uma diferença de 0.15 já é
+    relativamente forte.
+  */
+
+  const separation =
+    clamp(
+      margin
+      /
+      0.15,
+      0,
+      1
+    );
+
+
+  /*
+    Não queremos 100% com facilidade.
+  */
+
+  const confidence =
+    absolute * 0.58
+    +
+    separation * 0.42;
+
+
+  return Number(
+    clamp(
+      confidence,
+      0,
+      0.97
+    )
+    .toFixed(3)
+  );
+
+}
+
+
+/* =========================================
    CANDIDATOS PÚBLICOS
 ========================================= */
 
@@ -1868,18 +1686,30 @@ export function detectChordCandidatesFromChroma(
 ){
 
   let candidates =
-    buildCandidates(
-      chroma,
-      options
+    buildBaseCandidates(
+      chroma
     );
 
 
   candidates =
-    applyRootCorrection(
+    applyBassTieBreaker(
       candidates,
-      chroma,
       options.bassNote,
       options.bassChroma
+    );
+
+
+  candidates =
+    applyFamilyCorrections(
+      candidates,
+      chroma,
+      options.bassNote
+    );
+
+
+  const globalConfidence =
+    calculateConfidence(
+      candidates
     );
 
 
@@ -1908,21 +1738,61 @@ export function detectChordCandidatesFromChroma(
       limit
     )
     .map(
-      candidate => ({
+      (candidate,index) => {
 
-        ...candidate,
+        /*
+          Só o primeiro usa a confiança
+          global completa.
 
-        confidence:
-          clamp(
+          Alternativas recebem uma
+          representação comparativa.
+        */
+
+        let confidence;
+
+
+        if(
+          index === 0
+        ){
+
+          confidence =
+            globalConfidence;
+
+        }
+
+        else{
+
+          const difference =
+            candidates[0].score
+            -
+            candidate.score;
+
+
+          confidence =
+            clamp(
+              globalConfidence
+              -
+              difference * 1.5,
+              0,
+              0.95
+            );
+
+        }
+
+
+        return {
+
+          ...candidate,
+
+          confidence:
             Number(
-              candidate.score
+              confidence
                 .toFixed(3)
-            ),
-            0,
-            1
-          )
+            )
 
-      })
+        };
+
+      }
     );
 
 }
@@ -1942,7 +1812,8 @@ export function detectChordFromChroma(
       chroma,
       {
 
-        limit:5,
+        limit:
+          5,
 
         bassNote:
           options.bassNote,
@@ -1975,7 +1846,8 @@ export function detectChordFromChroma(
 
 
   if(
-    best.score < 0.26
+    best.score <
+    0.26
   ){
 
     return {
@@ -2086,7 +1958,7 @@ export function detectChord(
 
 
 /* =========================================
-   DECODER TEMPORAL v8
+   DECODER TEMPORAL v9
 ========================================= */
 
 export function decodeChordSequenceFromChroma(
@@ -2258,13 +2130,17 @@ export function decodeChordSequenceFromChroma(
 
   firstStates.push({
 
-    chord:"N",
+    chord:
+      "N",
 
-    candidate:null,
+    candidate:
+      null,
 
-    score:0.02,
+    score:
+      0.02,
 
-    previous:null
+    previous:
+      null
 
   });
 
@@ -2275,7 +2151,7 @@ export function decodeChordSequenceFromChroma(
 
 
   /* =====================================
-     FRAMES SEGUINTES
+     RESTANTE
   ===================================== */
 
   for(
@@ -2348,7 +2224,8 @@ export function decodeChordSequenceFromChroma(
 
 
         if(
-          previous.chord === chord
+          previous.chord ===
+          chord
         ){
 
           transition +=
@@ -2379,16 +2256,18 @@ export function decodeChordSequenceFromChroma(
 
 
         /*
-          Se o baixo atual é a root
-          do candidato, favorecemos
-          a mudança verdadeira.
+          Baixo NÃO troca o acorde.
+
+          Só dá bônus pequeno se o novo
+          candidato já foi escolhido
+          harmonicamente e sua root bate
+          com o baixo.
         */
 
         if(
           candidate
           &&
-          validFrames[t]
-            .bassNote
+          validFrames[t].bassNote
         ){
 
           const bassIndex =
@@ -2404,53 +2283,7 @@ export function decodeChordSequenceFromChroma(
           ){
 
             transition +=
-              0.05;
-
-          }
-
-        }
-
-
-        /*
-          Evita root drift de 1 semitom.
-        */
-
-        if(
-          candidate
-          &&
-          previous.candidate
-          &&
-          candidate.rootIndex !==
-          previous.candidate.rootIndex
-        ){
-
-          const distance =
-            pitchDistance(
-              candidate.rootIndex,
-              previous.candidate.rootIndex
-            );
-
-
-          if(
-            distance === 1
-          ){
-
-            const bassIndex =
-              noteIndex(
-                validFrames[t]
-                  .bassNote
-              );
-
-
-            if(
-              bassIndex !==
-              candidate.rootIndex
-            ){
-
-              transition -=
-                0.06;
-
-            }
+              0.018;
 
           }
 
@@ -2464,7 +2297,8 @@ export function decodeChordSequenceFromChroma(
             candidate.quality
           )
           &&
-          previous.chord !== chord
+          previous.chord !==
+          chord
         ){
 
           transition -=
@@ -2531,7 +2365,8 @@ export function decodeChordSequenceFromChroma(
     ];
 
 
-  let bestLastIndex = 0;
+  let bestLastIndex =
+    0;
 
 
   for(
@@ -2599,8 +2434,7 @@ export function decodeChordSequenceFromChroma(
         [],
 
       bassNote:
-        validFrames[t]
-          .bassNote
+        validFrames[t].bassNote
         ||
         null
 
@@ -2673,7 +2507,9 @@ export function decodedSequenceToTimeline(
       sequence[0].time;
 
 
-    if(diff > 0){
+    if(
+      diff > 0
+    ){
 
       defaultStep =
         diff;
@@ -2728,6 +2564,51 @@ export function decodedSequenceToTimeline(
       previous.chord ===
       current.chord
     ){
+
+      const oldDuration =
+        previous.end
+        -
+        previous.start;
+
+
+      const newDuration =
+        end
+        -
+        start;
+
+
+      const total =
+        oldDuration
+        +
+        newDuration;
+
+
+      if(
+        total > 0
+      ){
+
+        previous.confidence =
+          Number(
+            (
+              (
+                previous.confidence
+                *
+                oldDuration
+              )
+              +
+              (
+                current.confidence
+                *
+                newDuration
+              )
+            )
+            /
+            total
+          )
+          .toFixed(3);
+
+      }
+
 
       previous.end =
         end;
@@ -2836,7 +2717,8 @@ export function detectChordTimeline(
               index >= 0
             ){
 
-              chroma[index] = 1;
+              chroma[index] =
+                1;
 
             }
 
@@ -3139,8 +3021,13 @@ export function normalizeTimeline(
           );
 
 
-        if(!chord.valid)
+        if(
+          !chord.valid
+        ){
+
           return null;
+
+        }
 
 
         return {
@@ -3207,11 +3094,15 @@ export function getChordAtTime(
 
 
   const seconds =
-    Number(time);
+    Number(
+      time
+    );
 
 
   if(
-    !Number.isFinite(seconds)
+    !Number.isFinite(
+      seconds
+    )
   ){
 
     return null;
