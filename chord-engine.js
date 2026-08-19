@@ -1,16 +1,32 @@
 /* =========================================
-   CHORD AI — CHORD ENGINE v11
+   CHORD AI — CHORD ENGINE v12
 
-   Base:
-   - v10
+   Pipeline:
 
-   Objetivos:
-   - manter os 7 acordes corretos
-   - corrigir ambiguidades de root
-     deslocadas em 1 semitom
-   - foco especial em m7b5
-   - baixo continua conservador
-   - confiança continua realista
+   chroma por frame
+        ↓
+   candidatos harmônicos
+        ↓
+   bass como evidência leve
+        ↓
+   decoder temporal
+        ↓
+   segmentos
+        ↓
+   REGIONAL HARMONIC RESOLVER
+        ↓
+   timeline final
+
+   Objetivo do v12:
+   - preservar estabilidade do v11
+   - usar evidência de uma região inteira
+   - resolver ambiguidades de root
+   - especialmente casos como:
+
+     A#maj7 = A# D F A
+     Bm7b5  = B  D F A
+
+     quando o baixo regional é B.
 ========================================= */
 
 
@@ -184,8 +200,10 @@ function normalizeNote(
 
 
   return NOTES.includes(value)
-    ? value
-    : null;
+    ?
+    value
+    :
+    null;
 
 }
 
@@ -296,6 +314,118 @@ function pitchDistance(
   return Math.min(
     difference,
     12 - difference
+  );
+
+}
+
+
+function median(
+  values
+){
+
+  if(
+    !Array.isArray(values)
+    ||
+    values.length === 0
+  ){
+
+    return 0;
+
+  }
+
+
+  const sorted =
+    [...values]
+      .sort(
+        (a,b) =>
+          a - b
+      );
+
+
+  const middle =
+    Math.floor(
+      sorted.length / 2
+    );
+
+
+  if(
+    sorted.length % 2 === 0
+  ){
+
+    return (
+      sorted[middle - 1]
+      +
+      sorted[middle]
+    ) / 2;
+
+  }
+
+
+  return sorted[middle];
+
+}
+
+
+/* =========================================
+   MEDIANA DE CHROMA
+========================================= */
+
+function medianChroma(
+  chromas
+){
+
+  if(
+    !Array.isArray(chromas)
+    ||
+    chromas.length === 0
+  ){
+
+    return null;
+
+  }
+
+
+  const valid =
+    chromas
+      .map(
+        normalizeChroma
+      )
+      .filter(Boolean);
+
+
+  if(
+    valid.length === 0
+  ){
+
+    return null;
+
+  }
+
+
+  const result =
+    new Array(12)
+      .fill(0);
+
+
+  for(
+    let pitch = 0;
+    pitch < 12;
+    pitch++
+  ){
+
+    result[pitch] =
+      median(
+        valid.map(
+          vector =>
+            vector[pitch]
+        )
+      );
+
+  }
+
+
+  return normalizeChroma(
+    result
   );
 
 }
@@ -826,7 +956,7 @@ function isDiminishedQuality(
 
 
 /* =========================================
-   SCORE HARMÔNICO BASE
+   SCORE HARMÔNICO
 ========================================= */
 
 function scoreChordTemplate(
@@ -1056,10 +1186,6 @@ function scoreChordTemplate(
   }
 
 
-  /* =====================================
-     DIMINUTOS
-  ===================================== */
-
   if(
     isDiminishedQuality(
       quality
@@ -1072,10 +1198,6 @@ function scoreChordTemplate(
   }
 
 
-  /* =====================================
-     EXTENSÕES
-  ===================================== */
-
   if(
     isExtendedQuality(
       quality
@@ -1087,10 +1209,6 @@ function scoreChordTemplate(
 
   }
 
-
-  /* =====================================
-     BALANÇO
-  ===================================== */
 
   if(
     strongest > 0
@@ -1165,8 +1283,7 @@ function buildBaseCandidates(
         quality,
         intervals
       ]
-      of
-      Object.entries(
+      of Object.entries(
         CHORD_TYPES
       )
     ){
@@ -1270,15 +1387,68 @@ function samePitchSet(
 
   return aa.every(
     (note,index) =>
-      note ===
-      bb[index]
+      note === bb[index]
   );
 
 }
 
 
 /* =========================================
-   INFLUÊNCIA LEVE DO BAIXO
+   QUANTAS NOTAS COMPARTILHAM
+========================================= */
+
+function countSharedNotes(
+  a,
+  b
+){
+
+  if(
+    !a
+    ||
+    !b
+    ||
+    !Array.isArray(a.notes)
+    ||
+    !Array.isArray(b.notes)
+  ){
+
+    return 0;
+
+  }
+
+
+  const set =
+    new Set(
+      a.notes
+    );
+
+
+  let count = 0;
+
+
+  for(
+    const note
+    of b.notes
+  ){
+
+    if(
+      set.has(note)
+    ){
+
+      count++;
+
+    }
+
+  }
+
+
+  return count;
+
+}
+
+
+/* =========================================
+   BASS CONSERVADOR
 ========================================= */
 
 function applyConservativeBass(
@@ -1398,8 +1568,6 @@ function applyConservativeBass(
 
 /* =========================================
    MESMAS PITCH CLASSES
-
-   Am7 vs C6 etc.
 ========================================= */
 
 function resolveEquivalentPitchSets(
@@ -1506,261 +1674,7 @@ function resolveEquivalentPitchSets(
 
 
 /* =========================================
-   NOVO v11:
-
-   SEMITONE ROOT AMBIGUITY
-
-   Situação típica:
-
-   A#maj7 = A# D F A
-   Bm7b5  = B  D F A
-
-   Há apenas uma diferença de semitom
-   na possível fundamental.
-
-   Só corrige quando:
-
-   - candidato m7b5 está próximo
-   - bassNote = raiz do m7b5
-   - roots estão separadas por 1 semitom
-   - root m7b5 tem energia suficiente
-   - as demais notas coincidem muito
-========================================= */
-
-function resolveSemitoneRootAmbiguity(
-  candidates,
-  bassNote,
-  chroma
-){
-
-  if(
-    !Array.isArray(candidates)
-    ||
-    candidates.length < 2
-  ){
-
-    return candidates;
-
-  }
-
-
-  const bassIndex =
-    noteIndex(
-      bassNote
-    );
-
-
-  if(
-    bassIndex < 0
-  ){
-
-    return candidates;
-
-  }
-
-
-  const normalized =
-    normalizeChroma(
-      chroma
-    );
-
-
-  if(!normalized){
-
-    return candidates;
-
-  }
-
-
-  const sorted =
-    [...candidates];
-
-
-  const leader =
-    sorted[0];
-
-
-  const leaderSet =
-    new Set(
-      leader.notes
-    );
-
-
-  for(
-    const alternative
-    of sorted
-  ){
-
-    if(
-      alternative.quality !==
-      "MIN7B5"
-    ){
-
-      continue;
-
-    }
-
-
-    /*
-      Bass precisa apontar
-      diretamente para a root.
-    */
-
-    if(
-      alternative.rootIndex !==
-      bassIndex
-    ){
-
-      continue;
-
-    }
-
-
-    /*
-      Diferença de root precisa
-      ser exatamente 1 semitom.
-    */
-
-    if(
-      pitchDistance(
-        leader.rootIndex,
-        alternative.rootIndex
-      )
-      !==
-      1
-    ){
-
-      continue;
-
-    }
-
-
-    /*
-      O candidato precisa estar
-      harmonicamente próximo.
-    */
-
-    const scoreDifference =
-      leader.score
-      -
-      alternative.score;
-
-
-    if(
-      scoreDifference >
-      0.145
-    ){
-
-      continue;
-
-    }
-
-
-    /*
-      Energia real na root alternativa.
-    */
-
-    const alternativeRootEnergy =
-      normalized[
-        alternative.rootIndex
-      ];
-
-
-    if(
-      alternativeRootEnergy <
-      0.20
-    ){
-
-      continue;
-
-    }
-
-
-    /*
-      Calcula quantas notas as duas
-      hipóteses compartilham.
-    */
-
-    let sharedNotes = 0;
-
-
-    for(
-      const note
-      of alternative.notes
-    ){
-
-      if(
-        leaderSet.has(
-          note
-        )
-      ){
-
-        sharedNotes++;
-
-      }
-
-    }
-
-
-    /*
-      Queremos pelo menos 3 notas
-      compartilhadas.
-
-      Ex:
-      A#maj7 / Bm7b5
-      compartilham D F A.
-    */
-
-    if(
-      sharedNotes < 3
-    ){
-
-      continue;
-
-    }
-
-
-    /*
-      Quanto mais forte a root
-      detectada, maior o bônus.
-
-      Continua limitado para não
-      repetir o problema do v8.
-    */
-
-    const rootBonus =
-      clamp(
-        alternativeRootEnergy
-        *
-        0.075,
-        0.025,
-        0.075
-      );
-
-
-    alternative.score +=
-      0.070
-      +
-      rootBonus;
-
-  }
-
-
-  sorted.sort(
-    (a,b) =>
-      b.score
-      -
-      a.score
-  );
-
-
-  return sorted;
-
-}
-
-
-/* =========================================
-   HALF DIMINISHED NORMAL
+   FRAME-LEVEL M7B5
 ========================================= */
 
 function resolveHalfDiminished(
@@ -2117,18 +2031,6 @@ export function detectChordCandidatesFromChroma(
     );
 
 
-  /*
-    NOVO v11.
-  */
-
-  candidates =
-    resolveSemitoneRootAmbiguity(
-      candidates,
-      options.bassNote,
-      chroma
-    );
-
-
   candidates =
     resolveHalfDiminished(
       candidates,
@@ -2387,7 +2289,7 @@ export function detectChord(
 
 
 /* =========================================
-   DECODER TEMPORAL v11
+   DECODER TEMPORAL
 ========================================= */
 
 export function decodeChordSequenceFromChroma(
@@ -2462,6 +2364,12 @@ export function decodeChordSequenceFromChroma(
 
             time,
 
+            chroma:
+              frame.chroma,
+
+            bassChroma:
+              frame.bassChroma,
+
             bassNote:
               frame.bassNote
               ||
@@ -2530,10 +2438,6 @@ export function decodeChordSequenceFromChroma(
   const dp = [];
 
 
-  /* =====================================
-     PRIMEIRO FRAME
-  ===================================== */
-
   const firstStates =
     validFrames[0]
       .candidates
@@ -2559,17 +2463,13 @@ export function decodeChordSequenceFromChroma(
 
   firstStates.push({
 
-    chord:
-      "N",
+    chord:"N",
 
-    candidate:
-      null,
+    candidate:null,
 
-    score:
-      0.02,
+    score:0.02,
 
-    previous:
-      null
+    previous:null
 
   });
 
@@ -2578,10 +2478,6 @@ export function decodeChordSequenceFromChroma(
     firstStates
   );
 
-
-  /* =====================================
-     RESTANTE
-  ===================================== */
 
   for(
     let t = 1;
@@ -2684,11 +2580,6 @@ export function decodeChordSequenceFromChroma(
         }
 
 
-        /*
-          Bass continua tendo influência
-          temporal mínima.
-        */
-
         if(
           candidate
           &&
@@ -2781,18 +2672,13 @@ export function decodeChordSequenceFromChroma(
   }
 
 
-  /* =====================================
-     BACKTRACK
-  ===================================== */
-
   const lastStates =
     dp[
       dp.length - 1
     ];
 
 
-  let bestLastIndex =
-    0;
+  let bestLastIndex = 0;
 
 
   for(
@@ -3075,7 +2961,609 @@ export function decodedSequenceToTimeline(
 
 
 /* =========================================
-   PIPELINE CHROMA
+   BAIXO DOMINANTE DA REGIÃO
+========================================= */
+
+function getDominantBassForRegion(
+  frames
+){
+
+  if(
+    !Array.isArray(frames)
+    ||
+    frames.length === 0
+  ){
+
+    return {
+
+      note:null,
+
+      ratio:0,
+
+      count:0
+
+    };
+
+  }
+
+
+  const counts = {};
+
+
+  let validCount = 0;
+
+
+  for(
+    const frame
+    of frames
+  ){
+
+    if(
+      !frame.bassNote
+    ){
+
+      continue;
+
+    }
+
+
+    validCount++;
+
+
+    counts[
+      frame.bassNote
+    ] =
+      (
+        counts[
+          frame.bassNote
+        ]
+        ||
+        0
+      )
+      +
+      1;
+
+  }
+
+
+  const ranking =
+    Object.entries(
+      counts
+    )
+    .sort(
+      (a,b) =>
+        b[1] - a[1]
+    );
+
+
+  if(
+    ranking.length === 0
+  ){
+
+    return {
+
+      note:null,
+
+      ratio:0,
+
+      count:0
+
+    };
+
+  }
+
+
+  const [
+    note,
+    count
+  ] =
+    ranking[0];
+
+
+  return {
+
+    note,
+
+    count,
+
+    ratio:
+      validCount > 0
+      ?
+      count / validCount
+      :
+      0
+
+  };
+
+}
+
+
+/* =========================================
+   REGIONAL HARMONIC RESOLVER — v12
+
+   Esta é a novidade principal.
+========================================= */
+
+function resolveRegionalHarmony(
+  timeline,
+  frames
+){
+
+  if(
+    !Array.isArray(timeline)
+    ||
+    !Array.isArray(frames)
+  ){
+
+    return timeline;
+
+  }
+
+
+  return timeline.map(
+    segment => {
+
+      /*
+        Não reavaliamos silêncio.
+      */
+
+      if(
+        segment.chord === "N"
+      ){
+
+        return {
+          ...segment
+        };
+
+      }
+
+
+      const regionFrames =
+        frames.filter(
+          frame =>
+            Number(frame.time) >=
+            segment.start
+            &&
+            Number(frame.time) <
+            segment.end
+        );
+
+
+      /*
+        Poucos frames:
+        mantemos decisão original.
+      */
+
+      if(
+        regionFrames.length < 3
+      ){
+
+        return {
+          ...segment
+        };
+
+      }
+
+
+      /* ===================================
+         CHROMA MEDIANO DA REGIÃO
+      =================================== */
+
+      const regionChroma =
+        medianChroma(
+          regionFrames
+            .map(
+              frame =>
+                frame.chroma
+            )
+        );
+
+
+      if(!regionChroma){
+
+        return {
+          ...segment
+        };
+
+      }
+
+
+      /* ===================================
+         BAIXO DOMINANTE
+      =================================== */
+
+      const bass =
+        getDominantBassForRegion(
+          regionFrames
+        );
+
+
+      /*
+        Queremos persistência forte.
+
+        No benchmark problemático:
+        B = 13/13 = 1.0.
+      */
+
+      if(
+        !bass.note
+        ||
+        bass.ratio < 0.72
+      ){
+
+        return {
+          ...segment
+        };
+
+      }
+
+
+      /* ===================================
+         CANDIDATOS REGIONAIS
+
+         Não aplicamos as correções de
+         frame aqui.
+
+         Queremos score estrutural puro.
+      =================================== */
+
+      const candidates =
+        buildBaseCandidates(
+          regionChroma
+        );
+
+
+      if(
+        candidates.length === 0
+      ){
+
+        return {
+          ...segment
+        };
+
+      }
+
+
+      /*
+        Procuramos o candidato que o
+        decoder escolheu originalmente.
+      */
+
+      const original =
+        candidates.find(
+          candidate =>
+            candidate.chord ===
+            segment.chord
+        );
+
+
+      if(!original){
+
+        return {
+          ...segment
+        };
+
+      }
+
+
+      const bassIndex =
+        noteIndex(
+          bass.note
+        );
+
+
+      if(
+        bassIndex < 0
+      ){
+
+        return {
+          ...segment
+        };
+
+      }
+
+
+      /* ===================================
+         CANDIDATOS COM ROOT = BASS
+      =================================== */
+
+      const bassRootCandidates =
+        candidates
+          .filter(
+            candidate =>
+              candidate.rootIndex ===
+              bassIndex
+          )
+          .sort(
+            (a,b) =>
+              b.score
+              -
+              a.score
+          );
+
+
+      if(
+        bassRootCandidates.length === 0
+      ){
+
+        return {
+          ...segment
+        };
+
+      }
+
+
+      /*
+        Pega os melhores candidatos com
+        a fundamental indicada pelo baixo.
+      */
+
+      let alternative =
+        bassRootCandidates[0];
+
+
+      /* ===================================
+         PROTEÇÃO
+
+         Não queremos que qualquer acorde
+         com root = bass substitua tudo.
+
+         Ele precisa ser harmonicamente
+         parecido com a hipótese atual.
+      =================================== */
+
+      const shared =
+        countSharedNotes(
+          original,
+          alternative
+        );
+
+
+      const minimumShared =
+        Math.min(
+          original.notes.length,
+          alternative.notes.length
+        )
+        -
+        1;
+
+
+      if(
+        shared <
+        minimumShared
+      ){
+
+        return {
+          ...segment
+        };
+
+      }
+
+
+      /* ===================================
+         SCORE REGIONAL
+
+         Aqui damos peso forte à
+         consistência do baixo,
+         porque estamos olhando uma
+         região inteira e não um frame.
+      =================================== */
+
+      const originalRootMatchesBass =
+        original.rootIndex ===
+        bassIndex;
+
+
+      const alternativeRootMatchesBass =
+        alternative.rootIndex ===
+        bassIndex;
+
+
+      let originalRegionalScore =
+        original.score;
+
+
+      let alternativeRegionalScore =
+        alternative.score;
+
+
+      if(
+        originalRootMatchesBass
+      ){
+
+        originalRegionalScore +=
+          0.10
+          *
+          bass.ratio;
+
+      }
+
+
+      if(
+        alternativeRootMatchesBass
+      ){
+
+        alternativeRegionalScore +=
+          0.16
+          *
+          bass.ratio;
+
+      }
+
+
+      /*
+        Se roots estão a apenas
+        1 semitom e quase todas as notas
+        coincidem, a informação de baixo
+        é especialmente importante.
+      */
+
+      if(
+        pitchDistance(
+          original.rootIndex,
+          alternative.rootIndex
+        )
+        ===
+        1
+        &&
+        shared >= 3
+      ){
+
+        alternativeRegionalScore +=
+          0.055
+          *
+          bass.ratio;
+
+      }
+
+
+      /*
+        m7b5 recebe bônus pequeno apenas
+        quando:
+        - root coincide com baixo
+        - região é consistente
+        - compartilha boa parte das notas
+      */
+
+      if(
+        alternative.quality ===
+        "MIN7B5"
+        &&
+        alternativeRootMatchesBass
+        &&
+        bass.ratio >= 0.85
+      ){
+
+        alternativeRegionalScore +=
+          0.045;
+
+      }
+
+
+      /*
+        Não aceitamos mudança se a
+        alternativa estava absurdamente
+        distante harmonicamente.
+      */
+
+      const rawDifference =
+        original.score
+        -
+        alternative.score;
+
+
+      if(
+        rawDifference >
+        0.24
+      ){
+
+        return {
+          ...segment
+        };
+
+      }
+
+
+      /* ===================================
+         DECISÃO
+      =================================== */
+
+      if(
+        alternativeRegionalScore <=
+        originalRegionalScore
+        +
+        0.012
+      ){
+
+        return {
+          ...segment
+        };
+
+      }
+
+
+      /*
+        Nova confiança regional.
+
+        Não fingimos certeza absoluta.
+      */
+
+      const margin =
+        alternativeRegionalScore
+        -
+        originalRegionalScore;
+
+
+      const confidenceBoost =
+        clamp(
+          margin
+          /
+          0.20,
+          0,
+          1
+        );
+
+
+      const newConfidence =
+        clamp(
+          (
+            Number(
+              segment.confidence
+              ||
+              0
+            )
+            *
+            0.55
+          )
+          +
+          (
+            bass.ratio
+            *
+            0.25
+          )
+          +
+          (
+            confidenceBoost
+            *
+            0.20
+          ),
+          0,
+          0.93
+        );
+
+
+      return {
+
+        ...segment,
+
+        chord:
+          alternative.chord,
+
+        notes:
+          alternative.notes,
+
+        bassNote:
+          bass.note,
+
+        confidence:
+          Number(
+            newConfidence
+              .toFixed(3)
+          ),
+
+        regionalCorrection:
+          true
+
+      };
+
+    }
+  );
+
+}
+
+
+/* =========================================
+   PIPELINE CHROMA v12
 ========================================= */
 
 export function detectChordTimelineFromChroma(
@@ -3090,9 +3578,27 @@ export function detectChordTimelineFromChroma(
     );
 
 
-  return decodedSequenceToTimeline(
-    decoded
-  );
+  const timeline =
+    decodedSequenceToTimeline(
+      decoded
+    );
+
+
+  /*
+    NOVO:
+
+    segunda decisão usando
+    toda a região temporal.
+  */
+
+  const resolved =
+    resolveRegionalHarmony(
+      timeline,
+      frames
+    );
+
+
+  return resolved;
 
 }
 
@@ -3144,8 +3650,7 @@ export function detectChordTimeline(
               index >= 0
             ){
 
-              chroma[index] =
-                1;
+              chroma[index] = 1;
 
             }
 
@@ -3491,7 +3996,12 @@ export function normalizeTimeline(
           confidence:
             item.confidence
             ??
-            null
+            null,
+
+          regionalCorrection:
+            item.regionalCorrection
+            ||
+            false
 
         };
 
@@ -3512,9 +4022,7 @@ export function getChordAtTime(
 ){
 
   if(
-    !Array.isArray(
-      timeline
-    )
+    !Array.isArray(timeline)
   ){
 
     return null;
@@ -3529,9 +4037,7 @@ export function getChordAtTime(
 
 
   if(
-    !Number.isFinite(
-      seconds
-    )
+    !Number.isFinite(seconds)
   ){
 
     return null;
